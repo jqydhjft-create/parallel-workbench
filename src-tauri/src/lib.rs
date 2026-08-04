@@ -145,72 +145,41 @@ pub mod commands {
         Ok(json!({ "projects": projects }))
     }
 
-    /// 检查 WorkBuddy 集成状态：技能与记忆是否已安装
+    /// 检查 WorkBuddy 集成状态：工作空间目录下是否已导入项目级技能
+    /// 入参：{ dir: String }（工作空间根目录）
     #[tauri::command]
-    pub fn check_workbuddy_integration() -> Result<Value, String> {
+    pub fn check_workbuddy_integration(dir: String) -> Result<Value, String> {
         use serde_json::json;
-        let home = std::env::var("USERPROFILE")
-            .or_else(|_| std::env::var("HOME"))
-            .unwrap_or_else(|_| ".".into());
-        let skills_dir = PathBuf::from(&home).join(".workbuddy").join("skills");
-        let skill_dir = skills_dir.join("workbench-json-sync");
-        let memory_file = PathBuf::from(&home).join(".workbuddy").join("MEMORY.md");
+        let skill_dir = project_skill_dir(&dir);
         let skill_installed = skill_dir.join("SKILL.md").is_file();
-        let memory_merged = memory_file.is_file()
-            && fs::read_to_string(&memory_file)
-                .unwrap_or_default()
-                .contains("WorkBench");
         Ok(json!({
-            "home": home,
             "skill_installed": skill_installed,
-            "memory_merged": memory_merged,
             "skill_path": skill_dir.to_string_lossy().into_owned(),
-            "memory_path": memory_file.to_string_lossy().into_owned(),
-            "installed": skill_installed && memory_merged
+            "installed": skill_installed
         }))
     }
 
-    /// 一键安装 WorkBuddy 集成：写入技能到 ~/.workbuddy/skills/ + 合并记忆到 MEMORY.md
+    /// 导入 WorkBuddy 集成技能到工作空间目录：<dir>/.workbuddy/skills/workbench-json-sync
+    /// 入参：{ dir: String }（工作空间根目录）；只写项目级，不写全局、不写记忆
     #[tauri::command]
-    pub fn install_workbuddy_integration() -> Result<Value, String> {
+    pub fn install_workbuddy_integration(dir: String) -> Result<Value, String> {
         use serde_json::json;
-        let home = std::env::var("USERPROFILE")
-            .or_else(|_| std::env::var("HOME"))
-            .unwrap_or_else(|_| ".".into());
-        let wb_dir = PathBuf::from(&home).join(".workbuddy");
-        let skills_dir = wb_dir.join("skills");
-        let skill_dir = skills_dir.join("workbench-json-sync");
-        let memory_file = wb_dir.join("MEMORY.md");
-
-        // 1. 技能：从内置常量写入（include_str! 编译期嵌入，开发/发布一致）
+        let skill_dir = project_skill_dir(&dir);
         fs::create_dir_all(&skill_dir).map_err(|e| format!("创建技能目录失败: {e}"))?;
         let skill_ok = write_embedded_skill(&skill_dir).map_err(|e| format!("写入技能失败: {e}"))?;
-
-        // 2. 记忆：合并模板到用户级 MEMORY.md（去重）
-        let template = embedded_memory_template();
-        let memory_merged = if memory_file.exists() {
-            let existing = fs::read_to_string(&memory_file).unwrap_or_default();
-            if existing.contains("并行工作台 · WorkBench") {
-                true
-            } else {
-                let merged = format!("{}\n\n{}\n", existing.trim_end(), template);
-                fs::write(&memory_file, merged).map_err(|e| format!("写入记忆失败: {e}"))?;
-                true
-            }
-        } else {
-            let content = format!("# 用户长期记忆\n\n{}\n", template);
-            fs::write(&memory_file, content).map_err(|e| format!("写入记忆失败: {e}"))?;
-            true
-        };
-
         Ok(json!({
             "skill_installed": skill_ok,
-            "memory_merged": memory_merged,
-            "installed": skill_ok && memory_merged
+            "skill_path": skill_dir.to_string_lossy().into_owned(),
+            "installed": skill_ok
         }))
     }
 
-    /// 回退：内置技能内容（与 resources/workbench-json-sync 保持一致）
+    /// 项目级技能目录：<dir>/.workbuddy/skills/workbench-json-sync
+    fn project_skill_dir(dir: &str) -> PathBuf {
+        PathBuf::from(dir).join(".workbuddy").join("skills").join("workbench-json-sync")
+    }
+
+    /// 内置技能内容（include_str! 编译期嵌入，开发/发布一致）
     pub(crate) fn write_embedded_skill(skill_dir: &PathBuf) -> std::io::Result<bool> {
         use std::io::Write;
         let refs = skill_dir.join("references");
@@ -223,16 +192,11 @@ pub mod commands {
         )?;
         Ok(true)
     }
-
-    /// 记忆模板（与安装包 templates/memory-user.md 保持一致）
-    pub(crate) fn embedded_memory_template() -> &'static str {
-        include_str!("../resources/memory-user-template.md")
-    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::commands::{embedded_memory_template, write_embedded_skill};
+    use super::commands::write_embedded_skill;
     use std::fs;
     use std::path::PathBuf;
 
@@ -256,35 +220,23 @@ mod tests {
     }
 
     #[test]
-    fn memory_template_is_generic() {
-        let tmpl = embedded_memory_template();
-        assert!(tmpl.contains("WorkBench"));
-        assert!(!tmpl.contains("D:/个人开发者项目管理器"), "记忆模板不应写死路径");
-        assert!(tmpl.contains("定位项目根目录"), "应包含动态定位规则");
-    }
-
-    #[test]
-    fn install_writes_skill_and_memory() {
-        // 用临时目录模拟独立用户 HOME，验证完整安装写入逻辑
-        let fake_home = std::env::temp_dir().join(format!("wb-home-{}", std::process::id()));
-        let wb = fake_home.join(".workbuddy");
-        let skill_dir = wb.join("skills").join("workbench-json-sync");
-        let mem_file = wb.join("MEMORY.md");
-        let _ = fs::remove_dir_all(&fake_home);
+    fn install_writes_skill_to_project_dir() {
+        // 用临时目录模拟工作空间根目录，验证项目级安装（写入 <dir>/.workbuddy/skills/）
+        let ws = std::env::temp_dir().join(format!("wb-ws-{}", std::process::id()));
+        let skill_dir = ws.join(".workbuddy").join("skills").join("workbench-json-sync");
+        let _ = fs::remove_dir_all(&ws);
 
         fs::create_dir_all(&skill_dir).unwrap();
         let ok = write_embedded_skill(&skill_dir).unwrap();
         assert!(ok);
-        let tmpl = embedded_memory_template();
-        fs::write(&mem_file, format!("# 用户长期记忆\n\n{}\n", tmpl)).unwrap();
 
-        assert!(skill_dir.join("SKILL.md").is_file(), "技能 SKILL.md 应写入");
+        assert!(skill_dir.join("SKILL.md").is_file(), "技能 SKILL.md 应写入工作空间 .workbuddy/skills");
         assert!(skill_dir.join("references").join("schema.md").is_file(), "技能 schema 应写入");
-        let mem = fs::read_to_string(&mem_file).unwrap();
-        assert!(mem.contains("WorkBench"), "记忆应含规范");
         let skill_content = fs::read_to_string(skill_dir.join("SKILL.md")).unwrap();
         assert!(skill_content.contains("workbench-v1"), "技能应含 schema 版本");
         assert!(!skill_content.contains("D:/个人开发者项目管理器"), "技能不应写死路径");
-        let _ = fs::remove_dir_all(&fake_home);
+        // 不应写全局记忆
+        assert!(!ws.join(".workbuddy").join("MEMORY.md").exists(), "不应写记忆文件");
+        let _ = fs::remove_dir_all(&ws);
     }
 }

@@ -200,15 +200,15 @@
     openLocalPath(path) { return tauriOpenPath(path); },
     /* 扫描工作空间（WorkBuddy 集成：读 workbench.json 对接文档） */
     scanWorkspace(dir) { return tauriScanWorkbench(dir); },
-    /* WorkBuddy 集成状态检查（技能/记忆是否已装） */
-    checkWbIntegration() {
-      if (!isTauri()) return Promise.resolve(null);
-      return window.__TAURI__.core.invoke('check_workbuddy_integration').catch(e => { console.warn('[Tauri] check 失败:', e); return null; });
+    /* WorkBuddy 集成状态检查（项目级技能是否已导入工作空间） */
+    checkWbIntegration(dir) {
+      if (!isTauri() || !dir) return Promise.resolve(null);
+      return window.__TAURI__.core.invoke('check_workbuddy_integration', { dir }).catch(e => { console.warn('[Tauri] check 失败:', e); return null; });
     },
-    /* 一键安装 WorkBuddy 集成（写技能 + 合并记忆） */
-    installWbIntegration() {
-      if (!isTauri()) return Promise.resolve(null);
-      return window.__TAURI__.core.invoke('install_workbuddy_integration').catch(e => { console.warn('[Tauri] install 失败:', e); return null; });
+    /* 导入 WorkBuddy 集成技能到工作空间目录（项目级，不写全局/记忆） */
+    installWbIntegration(dir) {
+      if (!isTauri() || !dir) return Promise.resolve(null);
+      return window.__TAURI__.core.invoke('install_workbuddy_integration', { dir }).catch(e => { console.warn('[Tauri] install 失败:', e); return null; });
     },
     getWorkspaces() { return Array.isArray(this.data.workspaces) ? this.data.workspaces : []; },
     saveWorkspaces(list) { this.data.workspaces = list; this.save(); },

@@ -731,19 +731,22 @@
       '</div>' +
       '<div class="card" style="margin-top:14px;"><h3>🤖 WorkBuddy 工作空间 <span class="muted small">(扫描含 workbench.json 对接文档的项目)</span></h3>' +
       (S.getWorkspaces().length ? S.getWorkspaces().map(ws =>
-        '<div class="ws-card"><div><b>📁 ' + esc(ws.name) + '</b><div class="muted small" style="margin-top:2px;">' + esc(ws.path) + '</div></div>' +
+        '<div class="ws-card" style="flex-direction:column;align-items:stretch;">' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">' +
+        '<div><b>📁 ' + esc(ws.name) + '</b><div class="muted small" style="margin-top:2px;">' + esc(ws.path) + '</div></div>' +
         '<div style="display:flex;gap:8px;"><button class="btn btn-sm" data-act="scanWs" data-dir="' + esc(ws.path) + '">扫描</button>' +
-        '<button class="btn btn-sm btn-danger" data-act="removeWs" data-id="' + ws.id + '">移除</button></div></div>').join('')
+        '<button class="btn btn-sm btn-danger" data-act="removeWs" data-id="' + ws.id + '">移除</button></div></div>' +
+        '<div class="ws-integ" style="margin-top:8px;" data-wsdir="' + esc(ws.path) + '">' +
+        '<div style="display:flex;align-items:center;gap:8px;"><span class="ws-integ-dot" data-dot></span>' +
+        '<b data-title>检查集成状态…</b></div>' +
+        '<div class="muted small" data-detail style="margin:4px 0 0 20px;"></div>' +
+        '<div style="margin-top:8px;display:flex;gap:8px;">' +
+        '<button class="btn btn-sm btn-primary" data-act="installWb" data-dir="' + esc(ws.path) + '" disabled>导入技能</button>' +
+        '<button class="btn btn-sm" data-act="checkWb" data-dir="' + esc(ws.path) + '">重新检查</button></div></div>' +
+        '</div>').join('')
         : '<div class="muted" style="margin:8px 0;">尚未添加工作空间。添加后应用会扫描其中的项目（需每个项目目录含 <code>workbench.json</code> 对接文档）。</div>') +
-      '<div class="set-row" style="margin-top:8px;"><div><div class="sr-label">添加工作空间目录</div><div class="sr-desc">选择存放项目的根目录，扫描其中的 workbench.json</div></div>' +
+      '<div class="set-row" style="margin-top:8px;"><div><div class="sr-label">添加工作空间目录</div><div class="sr-desc">选择存放项目的根目录，自动导入集成技能并扫描其中的 workbench.json</div></div>' +
       '<button class="btn btn-sm btn-primary" data-act="addWs">＋ 添加</button></div>' +
-      '<div class="ws-integ" id="wsInteg">' +
-      '<div style="display:flex;align-items:center;gap:8px;"><span class="ws-integ-dot" id="wsIntegDot"></span>' +
-      '<b id="wsIntegTitle">检查集成状态…</b></div>' +
-      '<div class="muted small" id="wsIntegDetail" style="margin:4px 0 0 20px;"></div>' +
-      '<div style="margin-top:8px;display:flex;gap:8px;">' +
-      '<button class="btn btn-sm btn-primary" data-act="installWb" id="wsInstallBtn" disabled>一键安装</button>' +
-      '<button class="btn btn-sm" data-act="checkWb" id="wsCheckBtn">重新检查</button></div></div>' +
       '</div>' +
       '<div class="card" style="margin-top:14px;"><h3>⚙ 偏好</h3>' +
       '<div class="set-row"><div><div class="sr-label">截止日期提醒</div><div class="sr-desc">当天上午系统通知（P1 功能，原型为占位开关）</div></div>' +
@@ -767,11 +770,11 @@
         S.saveWorkspaces(S.getWorkspaces().filter(w => w.id !== el.dataset.id));
         toast('工作空间已移除', 'ok'); render();
       }
-      else if (act === 'checkWb') { refreshWbInteg(); }
-      else if (act === 'installWb') { installWbInteg(); }
+      else if (act === 'checkWb') { refreshWbInteg(el.dataset.dir); }
+      else if (act === 'installWb') { installWbInteg(el.dataset.dir); }
     }));
-    // 进入设置页时自动检查 WorkBuddy 集成状态
-    refreshWbInteg();
+    // 进入设置页时为每个工作空间自动检查集成状态
+    $$('#content .ws-integ[data-wsdir]').forEach(el => refreshWbInteg(el.dataset.wsdir));
     $('#importFile').addEventListener('change', e => {
       const f = e.target.files[0];
       if (!f) return;
@@ -811,6 +814,11 @@
     list.push({ id: 'ws_' + Date.now().toString(36), path, name: path.split(/[\\/]/).pop() || '工作空间', added_at: Date.now() });
     S.saveWorkspaces(list);
     toast('已添加工作空间', 'ok');
+    // 自动导入集成技能到工作空间（项目级 .workbuddy/skills），然后扫描
+    S.installWbIntegration(path).then(r => {
+      if (r && r.installed) toast('已导入集成技能到工作空间', 'ok');
+      else if (r) toast('技能导入未完全成功', 'err');
+    });
     scanWorkspaceAndImport(path, false);
   }
   // 扫描工作空间并导入（confirm 为 true 时扫描后直接全选导入，否则扫描后弹确认）
@@ -846,40 +854,43 @@
     });
   }
 
-  // 刷新 WorkBuddy 集成状态显示（设置页）
-  async function refreshWbInteg() {
-    const dot = $('#wsIntegDot'), title = $('#wsIntegTitle'), detail = $('#wsIntegDetail');
-    const installBtn = $('#wsInstallBtn');
-    if (!title) return;
-    const st = await S.checkWbIntegration();
+  // 刷新指定工作空间的 WorkBuddy 集成状态（项目级技能是否已导入）
+  async function refreshWbInteg(dir) {
+    const box = dir ? $('#content .ws-integ[data-wsdir="' + esc(dir) + '"]') : null;
+    if (!box) return;
+    const dot = box.querySelector('[data-dot]'), title = box.querySelector('[data-title]'), detail = box.querySelector('[data-detail]');
+    const installBtn = box.querySelector('[data-act="installWb"]');
+    const st = await S.checkWbIntegration(dir);
     if (!st) { // 浏览器模式或无响应
       title.textContent = '集成状态：浏览器模式不可用';
       if (dot) dot.className = 'ws-integ-dot warn';
-      if (detail) detail.textContent = '在桌面端应用内使用一键安装功能';
+      if (detail) detail.textContent = '在桌面端应用内使用技能导入功能';
       if (installBtn) installBtn.disabled = true;
       return;
     }
     if (st.installed) {
-      title.textContent = '✅ WorkBuddy 集成已就绪';
+      title.textContent = '✅ 集成技能已导入';
       if (dot) dot.className = 'ws-integ-dot ok';
-      if (detail) detail.textContent = '技能 ' + (st.skill_installed ? '已安装' : '未安装') + ' · 记忆 ' + (st.memory_merged ? '已合并' : '未合并');
-      if (installBtn) { installBtn.disabled = false; installBtn.textContent = '重新安装/更新'; }
+      if (detail) detail.textContent = '.workbuddy/skills/workbench-json-sync 已就绪，AI 对话可自动同步项目任务';
+      if (installBtn) { installBtn.disabled = false; installBtn.textContent = '更新技能'; }
     } else {
-      title.textContent = '⚠ 未安装 WorkBuddy 集成';
+      title.textContent = '⚠ 未导入集成技能';
       if (dot) dot.className = 'ws-integ-dot warn';
-      if (detail) detail.textContent = '技能 ' + (st.skill_installed ? '已安装' : '未安装') + ' · 记忆 ' + (st.memory_merged ? '已合并' : '未合并') + '。点击一键安装后，AI 对话即可自动同步项目任务。';
-      if (installBtn) { installBtn.disabled = false; installBtn.textContent = '一键安装'; }
+      if (detail) detail.textContent = '导入后 WorkBuddy 可维护此工作空间下各项目的 workbench.json（只写本项目级，不影响全局）';
+      if (installBtn) { installBtn.disabled = false; installBtn.textContent = '导入技能'; }
     }
   }
-  // 一键安装 WorkBuddy 集成
-  async function installWbInteg() {
-    const btn = $('#wsInstallBtn');
-    if (btn) { btn.disabled = true; btn.textContent = '安装中…'; }
-    const r = await S.installWbIntegration();
-    if (btn) { btn.disabled = false; btn.textContent = '重新安装/更新'; }
-    if (!r) { toast('安装失败（需桌面端）', 'err'); return; }
-    toast(r.installed ? '集成安装完成' : '安装未完全成功', r.installed ? 'ok' : 'err');
-    refreshWbInteg();
+  // 导入 WorkBuddy 集成技能到指定工作空间（项目级）
+  async function installWbInteg(dir) {
+    const box = dir ? $('#content .ws-integ[data-wsdir="' + esc(dir) + '"]') : null;
+    if (!box) return;
+    const btn = box.querySelector('[data-act="installWb"]');
+    if (btn) { btn.disabled = true; btn.textContent = '导入中…'; }
+    const r = await S.installWbIntegration(dir);
+    if (btn) { btn.disabled = false; btn.textContent = '更新技能'; }
+    if (!r) { toast('导入失败（需桌面端）', 'err'); return; }
+    toast(r.installed ? '集成技能已导入工作空间' : '导入未完全成功', r.installed ? 'ok' : 'err');
+    refreshWbInteg(dir);
   }
 
   // 导出：Tauri 环境走原生保存对话框，浏览器回退为下载
