@@ -1,0 +1,26 @@
+# ===== Rust / Cargo =====
+/target/
+**/*.rs.bk
+src-tauri/target/
+
+# ===== Tauri =====
+src-tauri/gen/
+src-tauri/gen/schemas/
+
+# ===== Node =====
+node_modules/
+
+# ===== 前端构建产物（由 index.html/css/js 重建）=====
+dist/
+
+# ===== 调试/临时文件（根目录截图与测试残留）=====
+/*.png
+/*.txt
+dbg-*
+*.log
+
+# ===== IDE / 系统 =====
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
