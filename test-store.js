@@ -191,5 +191,26 @@ console.log('== 统计 ==');
 const w = S.statsWeek();
 assert('统计包含 perProject', w.perProject.length === 1);
 
+console.log('== 统计面板增强 (F14) ==');
+// 先造一条今天的时间记录，验证趋势
+const trendTask = S.getTasks()[0];
+S.addTimeEntry(trendTask.id, 45, 'F14 测试');
+const sw = S.statsRange('week');
+assert('week 返回 7 天趋势', sw.days === 7 && sw.timeTrend.length === 7 && sw.doneTrend.length === 7);
+assert('week 趋势含今天的 45 分钟', sw.timeTrend[sw.timeTrend.length - 1].minutes >= 45);
+assert('week 投入合计 ≥45', sw.totalTime >= 45);
+assert('week 概览字段齐全', typeof sw.doneCount === 'number' && typeof sw.blocked === 'number' && typeof sw.totalEstimate === 'number');
+assert('week timeByProject 含投入', sw.timeByProject.length >= 1);
+assert('week estimateVsActual 与项目数一致', sw.estimateVsActual.length === S.getProjects().length);
+const sm = S.statsRange('month');
+assert('month 返回 30 天趋势', sm.days === 30 && sm.timeTrend.length === 30 && sm.doneTrend.length === 30);
+assert('month 趋势含今天的 45 分钟', sm.timeTrend[sm.timeTrend.length - 1].minutes >= 45);
+assert('month totalTime 与 week 一致(数据都在近期)', sm.totalTime === sw.totalTime);
+// 趋势标签格式（月/日）
+assert('趋势标签格式正确', /^\d+\/\d+$/.test(sw.timeTrend[0].label));
+// 历史时间记录不会进错天（结束时间早于 startKey 的不计入）
+const oldEntry = S.data.timeEntries.find(e => e.task_id === trendTask.id);
+assert('时间记录 end_at 为数值', typeof oldEntry.end_at === 'number' && oldEntry.end_at > 0);
+
 console.log('\n结果: ' + pass + ' 通过, ' + fail + ' 失败');
 process.exit(fail ? 1 : 0);

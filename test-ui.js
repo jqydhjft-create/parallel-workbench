@@ -68,6 +68,21 @@ setTimeout(() => {
     document.querySelector('[data-view="stats"]').click();
     assert('统计渲染', document.querySelectorAll('.stat-big').length >= 4);
     assert('生成周报按钮存在', !!document.querySelector('[data-act="genReport"]'));
+    assert('周/月切换存在', document.querySelectorAll('[data-f="range"]').length === 2);
+    assert('时间趋势图渲染', !!document.querySelector('#content svg polyline'));
+    assert('完成趋势柱状图渲染', document.querySelectorAll('.mini-bar').length >= 7);
+    assert('占比饼图渲染', !!document.querySelector('.donut'));
+    assert('预估vs实际渲染', document.querySelectorAll('.bar-track-dup').length >= 1);
+    // 切到月
+    const monthBtn = document.querySelector('[data-f="range"][data-v="month"]');
+    if (monthBtn) {
+      monthBtn.click();
+      assert('切月后柱状图 30 根', document.querySelectorAll('.mini-bar').length >= 30);
+      assert('切月后 active 状态正确', document.querySelector('[data-f="range"].active').dataset.v === 'month');
+    }
+    // 切回周
+    const weekBtn = document.querySelector('[data-f="range"][data-v="week"]');
+    if (weekBtn) weekBtn.click();
 
     document.querySelector('[data-view="settings"]').click();
     assert('设置渲染', !!document.querySelector('[data-act="exportJSON"]'));

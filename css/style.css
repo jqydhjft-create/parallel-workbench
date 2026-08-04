@@ -320,3 +320,21 @@ body.dark .timer-btn.stop:hover{background:#3a2020;}
 .timer-chip .timer-chip-time{font-family:ui-monospace,Consolas,monospace;font-weight:700;color:var(--accent);}
 .timer-chip .timer-chip-title{color:var(--ink-2);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .timer-chip.paused .timer-chip-time{color:var(--warn);}
+
+/* ===== 统计面板增强 (F14) ===== */
+.mini-bars{display:flex;align-items:flex-end;gap:4px;height:110px;padding-top:6px;}
+.mini-bar{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;height:100%;justify-content:flex-end;}
+.mini-bar i{width:100%;max-width:22px;border-radius:4px 4px 0 0;display:block;}
+.mini-bar span{font-size:9.5px;color:var(--ink-3);white-space:nowrap;}
+.pie-wrap{display:flex;align-items:center;gap:18px;flex-wrap:wrap;}
+.donut{width:130px;height:130px;border-radius:50%;position:relative;flex-shrink:0;}
+.donut-hole{position:absolute;inset:26px;background:var(--card);border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:inset 0 0 0 1px var(--line);}
+.donut-hole b{font-size:15px;color:var(--ink);}
+.donut-hole span{font-size:10.5px;color:var(--ink-3);}
+.pie-legend-wrap{display:flex;flex-direction:column;gap:7px;flex:1;min-width:160px;}
+.pie-legend{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink);}
+.pie-legend .muted{margin-left:auto;}
+.pie-dot{width:10px;height:10px;border-radius:3px;flex-shrink:0;}
+.bar-track-dup{flex:1;display:flex;flex-direction:column;gap:3px;min-height:22px;justify-content:center;}
+.bar-track-dup i{display:block;height:7px;border-radius:4px;transition:width .3s;}
+.bar-track-dup .ev-est{background:var(--ink-3);opacity:.4;}

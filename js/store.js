@@ -436,6 +436,71 @@
       };
     },
 
+    /* ----- 统计面板增强 (F14) ----- */
+    // range: 'week'（近7天）| 'month'（近30天）
+    statsRange(range) {
+      const days = range === 'month' ? 30 : 7;
+      const tasks = this.data.tasks;
+      const now = new Date();
+      // 构造 days 个日期（今天在前）
+      const daysList = [];
+      for (let i = days - 1; i >= 0; i--) {
+        const d = new Date(now); d.setDate(now.getDate() - i);
+        daysList.push({ key: todayStr(d), label: (d.getMonth() + 1) + '/' + d.getDate() });
+      }
+      const startKey = daysList[0].key;
+      const startTs = new Date(startKey + 'T00:00:00').getTime();
+
+      const done = tasks.filter(t => t.completed_at && t.completed_at >= startTs);
+      const perProject = this.getProjects().map(p => {
+        const pt = tasks.filter(t => t.project_id === p.id);
+        return { project: p, total: pt.length, done: pt.filter(t => t.status === 'done').length };
+      });
+      const timeByProject = this.getProjects().map(p => {
+        const ids = new Set(this.getProjectTasks(p.id).map(t => t.id));
+        const mins = this.data.timeEntries
+          .filter(e => ids.has(e.task_id) && e.end_at >= startTs)
+          .reduce((a, e) => a + e.minutes, 0);
+        return { project: p, minutes: mins };
+      }).filter(x => x.minutes > 0);
+
+      // 每日时间投入趋势
+      const timeTrend = daysList.map(d => {
+        const s = new Date(d.key + 'T00:00:00').getTime();
+        const e = s + 86400000;
+        const mins = this.data.timeEntries
+          .filter(te => te.end_at >= s && te.end_at < e)
+          .reduce((a, te) => a + te.minutes, 0);
+        return { date: d.key, label: d.label, minutes: mins };
+      });
+      // 每日完成任务趋势
+      const doneTrend = daysList.map(d => {
+        const s = new Date(d.key + 'T00:00:00').getTime();
+        const e = s + 86400000;
+        const n = tasks.filter(t => t.completed_at && t.completed_at >= s && t.completed_at < e).length;
+        return { date: d.key, label: d.label, count: n };
+      });
+      // 预估 vs 实际（按项目累计）
+      const estimateVsActual = this.getProjects().map(p => {
+        const pt = tasks.filter(t => t.project_id === p.id);
+        return {
+          project: p,
+          estimate: pt.reduce((a, t) => a + (t.estimate_min || 0), 0),
+          actual: pt.reduce((a, t) => a + (t.actual_min || 0), 0)
+        };
+      });
+
+      return {
+        range, days, startKey,
+        doneCount: done.length,
+        inProgress: tasks.filter(t => t.status === 'in_progress').length,
+        blocked: tasks.filter(t => t.status === 'blocked').length,
+        totalEstimate: tasks.filter(t => t.status !== 'done').reduce((a, t) => a + (t.estimate_min || 0), 0),
+        totalTime: this.data.timeEntries.filter(e => e.end_at >= startTs).reduce((a, e) => a + e.minutes, 0),
+        perProject, timeByProject, timeTrend, doneTrend, estimateVsActual
+      };
+    },
+
     /* ----- Backup (F19) ----- */
     createBackup() {
       const json = this.exportJSON();

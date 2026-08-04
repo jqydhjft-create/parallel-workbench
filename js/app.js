@@ -14,6 +14,7 @@
     filters: { status: 'all', priority: 'all', tag: 'all', due: 'all', sort: 'due', search: '' },
     boardProject: 'all',
     inboxFilter: false,
+    statsRange: 'week',       // 统计面板时间范围：week | month
     // 拖拽状态
     dragTaskId: null
   };
@@ -571,44 +572,115 @@
     });
   }
 
+  /* ================= 统计图表辅助 (F14) ================= */
+  // SVG 折线面积趋势图
+  function trendChart(items, color, opts) {
+    opts = opts || {};
+    const W = 620, H = opts.height || 120, PAD = 8;
+    const vals = items.map(it => it.value);
+    const max = Math.max.apply(null, vals.concat([1]));
+    const stepX = (W - PAD * 2) / Math.max(items.length - 1, 1);
+    const pts = vals.map((v, i) => {
+      const x = PAD + i * stepX;
+      const y = H - PAD - (v / max) * (H - PAD * 2 - 10);
+      return [x, y];
+    });
+    const line = pts.map(p => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ');
+    const area = PAD + ',' + (H - PAD) + ' ' + line + ' ' + (W - PAD) + ',' + (H - PAD);
+    // 标签：首/中/尾
+    const labelIdx = items.length > 14 ? [0, Math.floor(items.length / 2), items.length - 1] : [0, items.length - 1];
+    const labels = labelIdx.map(i =>
+      '<text x="' + (PAD + i * stepX) + '" y="' + (H - 2) + '" font-size="10" fill="var(--ink-3)" text-anchor="middle">' + esc(items[i].label) + '</text>').join('');
+    const dots = pts.map((p, i) =>
+      '<circle cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="' + (vals[i] > 0 ? 2.5 : 0) + '" fill="' + color + '"/>').join('');
+    return '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto;display:block;" role="img">' +
+      '<polygon points="' + area + '" fill="' + color + '" opacity=".12"/>' +
+      '<polyline points="' + line + '" fill="none" stroke="' + color + '" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>' +
+      dots + labels + '</svg>';
+  }
+  // conic-gradient 占比饼图
+  function donutChart(items, total) {
+    if (!total) return '<div class="empty" style="padding:20px;">该时间段暂无数据</div>';
+    let acc = 0;
+    const segs = items.map(it => {
+      const from = acc / total * 360;
+      acc += it.value;
+      const to = acc / total * 360;
+      return it.color + ' ' + from.toFixed(1) + 'deg ' + to.toFixed(1) + 'deg';
+    });
+    const legend = items.map(it =>
+      '<div class="pie-legend"><span class="pie-dot" style="background:' + it.color + '"></span>' + esc(it.name) +
+      '<span class="muted">' + U.fmtMinutes(it.value) + ' · ' + Math.round(it.value / total * 100) + '%</span></div>').join('');
+    return '<div class="pie-wrap"><div class="donut" style="background:conic-gradient(' + segs.join(',') + ');"><div class="donut-hole"><b>' + U.fmtMinutes(total).replace(' 分钟', 'm').replace(' 小时', 'h') + '</b><span>总计</span></div></div><div class="pie-legend-wrap">' + legend + '</div></div>';
+  }
+
   /* ================= 统计 ================= */
   function renderStats() {
-    const w = S.statsWeek();
+    const range = STATE.statsRange;
+    const w = S.statsRange(range);
+    const rangeLabel = range === 'month' ? '近 30 天' : '近 7 天';
     const totalMins = w.timeByProject.reduce((a, x) => a + x.minutes, 0);
     const maxMins = Math.max(...w.timeByProject.map(x => x.minutes), 1);
-    const maxDone = Math.max(...w.perProject.map(x => x.done), 1);
-    return '<div class="hero"><div><h2>统计与周报</h2><div class="date">本周（近 7 天）概览 · P1 里程碑：时间记录 + 周报</div></div>' +
+    const trend = w.timeTrend.map(d => ({ label: d.label, value: d.minutes }));
+    const dTrend = w.doneTrend.map(d => ({ label: d.label, value: d.count }));
+    const maxD = Math.max(...dTrend.map(x => x.value), 1);
+    const evMax = Math.max(...w.estimateVsActual.map(x => Math.max(x.estimate, x.actual)), 1);
+    const pieTotal = w.timeByProject.reduce((a, x) => a + x.minutes, 0);
+    const pieItems = w.timeByProject.map(x => ({ name: x.project.name, value: x.minutes, color: x.project.color }));
+    return '<div class="hero"><div><h2>统计与周报</h2><div class="date">' + rangeLabel + '概览 · 时间趋势 / 完成趋势 / 投入占比 / 预估对比</div></div>' +
       '<button class="btn btn-primary" data-act="genReport">📄 生成周报</button></div>' +
+      '<div class="seg" style="margin-bottom:14px;">' +
+      [['week', '近 7 天'], ['month', '近 30 天']].map(([k, v]) =>
+        '<button class="' + (range === k ? 'active' : '') + '" data-f="range" data-v="' + k + '">' + v + '</button>').join('') + '</div>' +
       '<div class="stat-cards">' +
-      '<div class="stat-big"><b>' + w.doneCount + '</b><span>本周完成任务</span></div>' +
-      '<div class="stat-big"><b>' + w.inProgress + '</b><span>进行中</span></div>' +
+      '<div class="stat-big"><b>' + w.doneCount + '</b><span>' + rangeLabel + '完成任务</span></div>' +
+      '<div class="stat-big"><b>' + U.fmtMinutes(w.totalTime).replace(' 分钟', 'm').replace(' 小时', 'h') + '</b><span>' + rangeLabel + '投入</span></div>' +
       '<div class="stat-big"><b style="color:var(--danger);">' + w.blocked + '</b><span>阻塞</span></div>' +
       '<div class="stat-big"><b>' + U.fmtMinutes(w.totalEstimate).replace(' 分钟', 'm').replace(' 小时', 'h') + '</b><span>剩余预估</span></div>' +
       '</div>' +
       '<div class="grid grid-2">' +
-      '<div class="card"><h3>⏱ 各项目投入时间 <span class="muted small">(本周)</span></h3>' +
+      '<div class="card"><h3>📈 时间投入趋势 <span class="muted small">(每日 ' + rangeLabel + ')</span></h3>' +
+      (w.totalTime ? trendChart(trend, 'var(--accent)') + '<div class="muted" style="margin-top:6px;">合计 ' + U.fmtMinutes(w.totalTime) + '</div>'
+        : '<div class="empty">该时间段暂无计时记录<br><span class="small">在任务上开始计时后这里会出现数据</span></div>') + '</div>' +
+      '<div class="card"><h3>✅ 完成任务趋势 <span class="muted small">(每日)</span></h3>' +
+      (w.doneCount ? '<div class="mini-bars">' + dTrend.map(d =>
+        '<div class="mini-bar" title="' + d.label + '：' + d.value + ' 个"><i style="height:' + Math.max(3, Math.round(d.value / maxD * 100)) + '%;background:var(--ok);"></i><span>' + d.label + '</span></div>').join('') + '</div>'
+        : '<div class="empty">该时间段暂无完成任务</div>') + '</div>' +
+      '</div>' +
+      '<div class="grid grid-2" style="margin-top:14px;">' +
+      '<div class="card"><h3>🥧 项目投入占比 <span class="muted small">(' + rangeLabel + ')</span></h3>' +
+      donutChart(pieItems, pieTotal) + '</div>' +
+      '<div class="card"><h3>⚖ 预估 vs 实际 <span class="muted small">(累计)</span></h3>' +
+      w.estimateVsActual.map(x => {
+        const est = Math.round(x.estimate / evMax * 100), act = Math.round(x.actual / evMax * 100);
+        return '<div class="bar-row"><span class="bar-label" style="color:' + x.project.color + ';">● ' + esc(x.project.name) + '</span>' +
+          '<div class="bar-track-dup">' +
+          '<i class="ev-est" style="width:' + est + '%;" title="预估 ' + U.fmtMinutes(x.estimate) + '"></i>' +
+          '<i class="ev-act" style="width:' + act + '%;background:' + x.project.color + ';" title="实际 ' + U.fmtMinutes(x.actual) + '"></i></div>' +
+          '<span class="bar-val">' + U.fmtMinutes(x.actual) + ' / ' + U.fmtMinutes(x.estimate) + '</span></div>';
+      }).join('') + '</div>' +
+      '</div>' +
+      '<div class="grid grid-2" style="margin-top:14px;">' +
+      '<div class="card"><h3>⏱ 各项目投入时间 <span class="muted small">(' + rangeLabel + ')</span></h3>' +
       (w.timeByProject.length ? w.timeByProject.map(x =>
         '<div class="bar-row"><span class="bar-label" style="color:' + x.project.color + ';">● ' + esc(x.project.name) + '</span>' +
         '<div class="bar-track"><i style="width:' + Math.round(x.minutes / maxMins * 100) + '%;background:' + x.project.color + '"></i></div>' +
         '<span class="bar-val">' + U.fmtMinutes(x.minutes) + '</span></div>').join('') +
         '<div class="muted" style="margin-top:8px;">合计 ' + U.fmtMinutes(totalMins) + '</div>'
-        : '<div class="empty">本周暂无计时记录<br><span class="small">在任务上开始计时后这里会出现数据</span></div>') + '</div>' +
+        : '<div class="empty">该时间段暂无计时记录</div>') + '</div>' +
       '<div class="card"><h3>✅ 各项目完成情况 <span class="muted small">(累计)</span></h3>' +
       w.perProject.map(x =>
         '<div class="bar-row"><span class="bar-label">' + esc(x.project.name) + '</span>' +
         '<div class="bar-track"><i style="width:' + (x.total ? Math.round(x.done / x.total * 100) : 0) + '%;background:var(--ok);"></i></div>' +
         '<span class="bar-val">' + x.done + '/' + x.total + '</span></div>').join('') + '</div>' +
-      '</div>' +
-      '<div class="card" style="margin-top:14px;"><h3>📊 状态分布</h3>' +
-      '<div class="grid grid-4" style="margin-top:8px;">' +
-      [['todo', '待办', '#868e96'], ['in_progress', '进行中', '#1971c2'], ['blocked', '阻塞', '#e03131'], ['done', '已完成', '#2f9e44']].map(([k, v, c]) => {
-        const n = S.getTasks().filter(t => t.status === k).length;
-        const pct = S.getTasks().length ? Math.round(n / S.getTasks().length * 100) : 0;
-        return '<div class="stat-big" style="box-shadow:none;"><b style="color:' + c + ';">' + n + '</b><span>' + v + ' · ' + pct + '%</span></div>';
-      }).join('') + '</div></div>';
+      '</div>';
   }
 
   function bindStats() {
+    $$('#content [data-f="range"]').forEach(el => el.addEventListener('click', e => {
+      STATE.statsRange = el.dataset.v;
+      render();
+    }));
     const btn = $('#content [data-act="genReport"]');
     if (btn) btn.addEventListener('click', () => {
       const md = generateWeeklyReport();
@@ -617,13 +689,15 @@
     });
   }
   function generateWeeklyReport() {
-    const w = S.statsWeek();
+    const range = STATE.statsRange;
+    const w = S.statsRange(range);
+    const rangeLabel = range === 'month' ? '近 30 天' : '本周（近 7 天）';
     const totalMins = w.timeByProject.reduce((a, x) => a + x.minutes, 0);
-    let md = '# 本周工作周报（' + U.todayStr() + '）\n\n';
-    md += '## 概览\n\n- 本周完成任务：' + w.doneCount + '\n- 当前进行中：' + w.inProgress + '\n- 当前阻塞：' + w.blocked + '\n- 剩余预估耗时：' + U.fmtMinutes(w.totalEstimate) + '\n\n';
+    let md = '# 工作周报（' + rangeLabel + ' · ' + U.todayStr() + '）\n\n';
+    md += '## 概览\n\n- 完成任务：' + w.doneCount + '\n- 投入时间：' + U.fmtMinutes(w.totalTime) + '\n- 当前进行中：' + w.inProgress + '\n- 当前阻塞：' + w.blocked + '\n- 剩余预估耗时：' + U.fmtMinutes(w.totalEstimate) + '\n\n';
     md += '## 各项目时间投入\n\n| 项目 | 投入时间 |\n|---|---|\n';
     if (w.timeByProject.length) w.timeByProject.forEach(x => { md += '| ' + x.project.name + ' | ' + U.fmtMinutes(x.minutes) + ' |\n'; });
-    else md += '| （本周暂无计时） | — |\n';
+    else md += '| （该时间段暂无计时） | — |\n';
     md += '| **合计** | **' + U.fmtMinutes(totalMins) + '** |\n\n';
     md += '## 各项目完成情况\n\n| 项目 | 完成 | 全部 |\n|---|---|---|\n';
     w.perProject.forEach(x => { md += '| ' + x.project.name + ' | ' + x.done + ' | ' + x.total + ' |\n'; });
