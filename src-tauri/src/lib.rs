@@ -94,8 +94,9 @@ pub mod commands {
         Ok(path.to_string_lossy().into_owned())
     }
 
-    /// 扫描工作空间根目录，查找含 workbench.json 对接文档的子目录（WorkBuddy 集成）
+    /// 扫描工作空间根目录，查找含 workbench.json 对接文档的项目（WorkBuddy 集成）
     /// 入参：{ dir: String }；返回：{ projects: [ { name, path, tech_stack, desc, status, tasks_count, doc } ] }
+    /// 所选目录本身含 workbench.json 时也作为一个候选（支持"选项目目录"或"选父目录"两种层级）
     #[tauri::command]
     pub fn scan_workbench_files(dir: String) -> Result<Value, String> {
         use serde_json::json;
@@ -104,45 +105,61 @@ pub mod commands {
             return Err(format!("目录不存在: {dir}"));
         }
         let mut projects = Vec::new();
-        let entries = fs::read_dir(&root).map_err(|e| format!("读取目录失败: {e}"))?;
-        for entry in entries {
-            let entry = entry.map_err(|e| format!("读取目录项失败: {e}"))?;
-            let p = entry.path();
-            if !p.is_dir() {
-                continue;
+        // 1. 所选目录本身（用户可能直接选项目目录）
+        push_workbench_candidate(&mut projects, &root);
+        // 2. 子目录（用户选项目根目录/父目录）
+        if let Ok(entries) = fs::read_dir(&root) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if !p.is_dir() {
+                    continue;
+                }
+                let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                if name.starts_with('.') || name == "node_modules" || name == "target" {
+                    continue;
+                }
+                push_workbench_candidate(&mut projects, &p);
             }
-            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if name.starts_with('.') || name == "node_modules" || name == "target" {
-                continue;
-            }
-            let doc_path = p.join("workbench.json");
-            if !doc_path.is_file() {
-                continue;
-            }
-            let text = fs::read_to_string(&doc_path).unwrap_or_default();
-            let doc: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
-            let proj = doc.get("project");
-            let tasks = doc.get("tasks");
-            let tasks_count = tasks
-                .and_then(|t| t.as_array())
-                .map(|a| a.len())
-                .unwrap_or(0);
-            projects.push(json!({
-                "name": proj.and_then(|x| x.get("name")).and_then(|x| x.as_str()).unwrap_or(name).to_string(),
-                "path": p.to_string_lossy().into_owned(),
-                "tech_stack": proj.and_then(|x| x.get("tech_stack")).and_then(|x| x.as_str()).unwrap_or("").to_string(),
-                "desc": proj.and_then(|x| x.get("description")).and_then(|x| x.as_str()).unwrap_or("").to_string(),
-                "status": proj.and_then(|x| x.get("status")).and_then(|x| x.as_str()).unwrap_or("active").to_string(),
-                "repo_url": proj.and_then(|x| x.get("repo_url")).and_then(|x| x.as_str()).unwrap_or("").to_string(),
-                "tasks_count": tasks_count,
-                "doc": doc
-            }));
         }
+        // 按 path 去重（所选目录本身与其子目录不重叠，但防御重复）
         projects.sort_by(|a, b| {
-            a.get("name").and_then(|x| x.as_str()).unwrap_or("")
-                .cmp(b.get("name").and_then(|x| x.as_str()).unwrap_or(""))
+            let ka = a.get("path").and_then(|x| x.as_str()).unwrap_or("");
+            let kb = b.get("path").and_then(|x| x.as_str()).unwrap_or("");
+            ka.cmp(kb)
+        });
+        projects.dedup_by(|a, b| {
+            a.get("path").and_then(|x| x.as_str())
+                == b.get("path").and_then(|x| x.as_str())
         });
         Ok(json!({ "projects": projects }))
+    }
+
+    /// 若目录内含 workbench.json，将其解析为候选项目并加入列表
+    fn push_workbench_candidate(projects: &mut Vec<Value>, p: &PathBuf) {
+        use serde_json::json;
+        let doc_path = p.join("workbench.json");
+        if !doc_path.is_file() {
+            return;
+        }
+        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        let text = fs::read_to_string(&doc_path).unwrap_or_default();
+        let doc: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+        let proj = doc.get("project");
+        let tasks = doc.get("tasks");
+        let tasks_count = tasks
+            .and_then(|t| t.as_array())
+            .map(|a| a.len())
+            .unwrap_or(0);
+        projects.push(json!({
+            "name": proj.and_then(|x| x.get("name")).and_then(|x| x.as_str()).unwrap_or(name).to_string(),
+            "path": p.to_string_lossy().into_owned(),
+            "tech_stack": proj.and_then(|x| x.get("tech_stack")).and_then(|x| x.as_str()).unwrap_or("").to_string(),
+            "desc": proj.and_then(|x| x.get("description")).and_then(|x| x.as_str()).unwrap_or("").to_string(),
+            "status": proj.and_then(|x| x.get("status")).and_then(|x| x.as_str()).unwrap_or("active").to_string(),
+            "repo_url": proj.and_then(|x| x.get("repo_url")).and_then(|x| x.as_str()).unwrap_or("").to_string(),
+            "tasks_count": tasks_count,
+            "doc": doc
+        }));
     }
 
     /// 检查 WorkBuddy 集成状态：工作空间目录下是否已导入项目级技能
@@ -196,7 +213,7 @@ pub mod commands {
 
 #[cfg(test)]
 mod tests {
-    use super::commands::write_embedded_skill;
+    use super::commands::{scan_workbench_files, write_embedded_skill};
     use std::fs;
     use std::path::PathBuf;
 
@@ -237,6 +254,33 @@ mod tests {
         assert!(!skill_content.contains("D:/个人开发者项目管理器"), "技能不应写死路径");
         // 不应写全局记忆
         assert!(!ws.join(".workbuddy").join("MEMORY.md").exists(), "不应写记忆文件");
+        let _ = fs::remove_dir_all(&ws);
+    }
+
+    #[test]
+    fn scan_finds_project_at_both_levels() {
+        // 模拟：临时目录 ws 下有子项目 sub/，且 ws 本身也含 workbench.json
+        let ws = std::env::temp_dir().join(format!("wb-scan-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&ws);
+        let sub = ws.join("sub");
+        fs::create_dir_all(&sub).unwrap();
+        // 子项目
+        fs::write(sub.join("workbench.json"), r#"{"schema":"workbench-v1","project":{"name":"子项目"},"tasks":[]}"#).unwrap();
+        // 所选目录本身也作为项目
+        fs::write(ws.join("workbench.json"), r#"{"schema":"workbench-v1","project":{"name":"根项目"},"tasks":[]}"#).unwrap();
+
+        // 选父目录（根目录）→ 应扫到子项目
+        let r1 = scan_workbench_files(ws.to_string_lossy().into_owned()).unwrap();
+        let names1: Vec<&str> = r1["projects"].as_array().unwrap().iter()
+            .filter_map(|p| p["name"].as_str()).collect();
+        assert!(names1.contains(&"子项目"), "选父目录应扫到子项目: {:?}", names1);
+
+        // 选项目目录本身（sub）→ 也应扫到
+        let r2 = scan_workbench_files(sub.to_string_lossy().into_owned()).unwrap();
+        let names2: Vec<&str> = r2["projects"].as_array().unwrap().iter()
+            .filter_map(|p| p["name"].as_str()).collect();
+        assert!(names2.contains(&"子项目"), "选项目目录本身也应扫到: {:?}", names2);
+
         let _ = fs::remove_dir_all(&ws);
     }
 }
