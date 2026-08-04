@@ -52,6 +52,8 @@
     $$('#nav .nav-item').forEach(b => b.classList.toggle('active', b.dataset.view === view));
     $('#topbarTitle').textContent = view === 'projects' && STATE.projectId ? S.getProject(STATE.projectId).name : VIEW_TITLES[view];
     render();
+    // 进入总览/项目视图时静默同步工作空间（workbench.json 变化自动出现，30 秒节流）
+    if (view === 'home' || view === 'projects') silentSyncWorkspaces(false);
   }
 
   /* ================= 渲染分发 ================= */
@@ -891,6 +893,24 @@
     if (!r) { toast('导入失败（需桌面端）', 'err'); return; }
     toast(r.installed ? '集成技能已导入工作空间' : '导入未完全成功', r.installed ? 'ok' : 'err');
     refreshWbInteg(dir);
+  }
+
+  // ============ workbench.json 静默同步（进入视图时自动扫描，30 秒节流） ============
+  let wbLastSync = 0;
+  // 进入总览/项目视图时静默重扫所有工作空间（不弹确认框，节流避免频繁 invoke）
+  async function silentSyncWorkspaces(force) {
+    if (!window.__TAURI__) return;
+    const now = Date.now();
+    if (!force && now - wbLastSync < 30000) return;
+    const workspaces = S.getWorkspaces();
+    if (!workspaces.length) return;
+    wbLastSync = now;
+    for (const ws of workspaces) {
+      const res = await S.scanWorkspace(ws.path);
+      if (!res || !res.projects || !res.projects.length) continue;
+      res.projects.forEach(p => S.importFromWorkbench(p));
+    }
+    render();
   }
 
   // 导出：Tauri 环境走原生保存对话框，浏览器回退为下载
