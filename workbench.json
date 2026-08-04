@@ -1,6 +1,6 @@
 {
   "schema": "workbench-v1",
-  "updated_at": 1785841200000,
+  "updated_at": 1785845220000,
   "project": {
     "name": "并行工作台",
     "description": "面向独立开发者的本地优先多项目并行开发管理桌面应用。Tauri 2 + 原生前端，一个入口管住所有项目，2 秒恢复上下文，1 张看板看清优先级，1 份周报完成复盘。",
@@ -45,6 +45,15 @@
       "estimate_min": 240,
       "tags": ["M3", "提醒"],
       "note": "截止当天上午系统通知，09:00 每日计划提醒，开关可配置"
+    },
+    {
+      "title": "F12 番茄钟（已搁置）",
+      "status": "done",
+      "priority": "P3",
+      "due_date": null,
+      "estimate_min": 240,
+      "tags": ["已搁置"],
+      "note": "用户确认不需要，转向 WorkBuddy 工作空间集成方向"
     },
     {
       "title": "F19 备份还原 UI",
