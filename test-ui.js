@@ -99,6 +99,50 @@ setTimeout(() => {
       assert('拖拽到已完成列后状态持久化', window.Store.getTask(card.dataset.task).status === 'done');
     }
 
+    console.log('== 计时器 UI (F11) ==');
+    // 任务视图：开始计时
+    document.querySelector('[data-view="tasks"]').click();
+    const timerTask = window.Store.getTasks().find(t => t.status !== 'done');
+    const timerBtn = document.querySelector('.task-item[data-task="' + timerTask.id + '"] [data-act="timer"]');
+    assert('任务行有开始计时按钮', !!timerBtn);
+    if (timerBtn) {
+      timerBtn.click();
+      assert('点击后计时器启动', window.Store.getTimer() && window.Store.getTimer().task_id === timerTask.id);
+      assert('任务行出现 timing 高亮', !!document.querySelector('.task-item[data-task="' + timerTask.id + '"].timing'));
+      assert('任务行出现暂停按钮', !!document.querySelector('.task-item[data-task="' + timerTask.id + '"] [data-act="timer-pause"]'));
+      assert('任务行出现计时显示', !!document.querySelector('.task-item[data-task="' + timerTask.id + '"] .timer-tick'));
+      // 暂停
+      document.querySelector('.task-item[data-task="' + timerTask.id + '"] [data-act="timer-pause"]').click();
+      assert('暂停后 running=false', window.Store.getTimer() && window.Store.getTimer().running === false);
+      // 继续
+      document.querySelector('.task-item[data-task="' + timerTask.id + '"] [data-act="timer-pause"]').click();
+      assert('继续后 running=true', window.Store.getTimer() && window.Store.getTimer().running === true);
+      // 停止
+      document.querySelector('.task-item[data-task="' + timerTask.id + '"] [data-act="timer-stop"]').click();
+      assert('停止后 timer 清空', window.Store.getTimer() === null);
+    }
+    // 项目详情：task- 前缀计时按钮
+    document.querySelector('[data-view="projects"]').click();
+    document.querySelector('[data-viewproject]').click();
+    assert('项目详情任务行有 task-timer 按钮', !!document.querySelector('[data-act="task-timer"]'));
+    const pTimerBtn = document.querySelector('[data-act="task-timer"]');
+    if (pTimerBtn) {
+      pTimerBtn.click();
+      assert('项目详情点击可启动计时', !!window.Store.getTimer());
+      window.Store.stopTimer(window.Store.getTimer().task_id);
+    }
+    // 看板：迷你计时按钮
+    document.querySelector('[data-view="board"]').click();
+    assert('看板卡片有迷你计时按钮', !!document.querySelector('.board-card [data-act="timer"]'));
+    const bcTimer = document.querySelector('.board-card [data-act="timer"]');
+    if (bcTimer) {
+      bcTimer.click();
+      assert('看板迷你按钮可启动计时', !!window.Store.getTimer());
+      window.Store.stopTimer(window.Store.getTimer().task_id);
+    }
+    // 顶栏 timer chip
+    assert('timerChip 存在', !!document.querySelector('#timerChip'));
+
     console.log('\n结果: ' + pass + ' 通过, ' + fail + ' 失败');
     process.exit(fail ? 1 : 0);
   } catch (e) {

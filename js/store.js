@@ -9,6 +9,7 @@
 
   const LS_KEY = 'parallel-workbench-v1';
   const COLORS = ['#3b5bdb', '#e8590c', '#2f9e44', '#e03131', '#7048e8', '#0c8599', '#f08c00', '#5c7cfa'];
+  const STALE_TIMER_MS = 12 * 3600 * 1000; // 计时超过 12h 视为陈旧（应用曾被关闭）
 
   /* ---------- 工具函数 ---------- */
   function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
@@ -112,6 +113,7 @@
       timeEntries,
       snapshots,
       backups: [],
+      timer: null,
       settings: { dark: false, remindDue: true, remindPlan: true, remindTime: '09:00', backupKeep: 7 }
     };
   }
@@ -153,12 +155,14 @@
         if (raw) { this.data = JSON.parse(raw); loadedFromLS = true; }
       } catch (e) { console.warn('读取本地缓存失败，重置为种子数据', e); }
       if (!this.data) { this.data = seed(); this.save(); }
+      else if (this._normalizeTimer()) this.save();
       // Tauri：异步从文件加载，文件优先（桌面端数据权威来源）
       if (isTauri()) {
         tauriLoadData().then(d => {
           if (d) {
             this.data = d;
-            try { localStorage.setItem(LS_KEY, JSON.stringify(d)); } catch (e) {}
+            if (this._normalizeTimer()) this.save();
+            try { localStorage.setItem(LS_KEY, JSON.stringify(this.data)); } catch (e) {}
             if (this.onExternalLoad) this.onExternalLoad();
           } else if (!loadedFromLS) {
             // 首次启动且无文件 → 把种子数据写入文件
@@ -180,6 +184,7 @@
       const d = JSON.parse(text);
       if (!d || !Array.isArray(d.projects) || !Array.isArray(d.tasks)) throw new Error('文件格式不正确');
       this.data = d;
+      this._normalizeTimer();
       this.save();
     },
     /* 打开本地路径（F16 桌面能力） */
@@ -211,6 +216,8 @@
       const i = this.data.tasks.findIndex(x => x.id === t.id);
       t.updated_at = Date.now();
       if (i >= 0) this.data.tasks[i] = t; else this.data.tasks.push(t);
+      // 保存为 done 且该任务在计时 → 自动结算
+      if (t.status === 'done' && this.data.timer && this.data.timer.task_id === t.id) this.settleTimer();
       this.save();
     },
     deleteTask(id) {
@@ -219,6 +226,7 @@
         this.data.plans[k].task_order = this.data.plans[k].task_order.filter(x => x !== id);
       });
       this.data.timeEntries = this.data.timeEntries.filter(e => e.task_id !== id);
+      if (this.data.timer && this.data.timer.task_id === id) this.data.timer = null;
       this.save();
     },
     updateTaskStatus(id, status) {
@@ -229,6 +237,8 @@
       if (status !== 'done') t.completed_at = null;
       if (status !== 'blocked') t.blocked_reason = '';
       t.updated_at = Date.now();
+      // 标记完成且该任务在计时 → 自动结算
+      if (status === 'done' && this.data.timer && this.data.timer.task_id === id) this.settleTimer();
       this.save();
     },
     setTaskBlocked(id, reason) {
@@ -263,11 +273,111 @@
     /* ----- TimeEntry ----- */
     getTimeEntries(taskId) { return this.data.timeEntries.filter(e => e.task_id === taskId); },
     addTimeEntry(taskId, minutes, note) {
-      const e = { id: uid(), task_id: taskId, start_at: Date.now(), end_at: Date.now(), minutes, note: note || '' };
+      this.pushTimeEntry(taskId, minutes, note, Date.now(), Date.now());
+      this.save();
+    },
+    // 内部写入一条时间记录并累加 actual_min，不 save（供计时结算复用，避免双写）
+    pushTimeEntry(taskId, minutes, note, startAt, endAt) {
+      const e = { id: uid(), task_id: taskId, start_at: startAt, end_at: endAt, minutes, note: note || '' };
       this.data.timeEntries.push(e);
       const t = this.getTask(taskId);
       if (t) { t.actual_min = (t.actual_min || 0) + minutes; t.updated_at = Date.now(); }
+    },
+
+    /* ----- 计时器 (F11) ----- */
+    getTimer() { return this.data.timer || null; },
+    // 当前累计毫秒：running 时含正在进行的分段
+    timerElapsedMs() {
+      const tm = this.data.timer;
+      if (!tm) return 0;
+      let ms = tm.accumulated_ms || 0;
+      if (tm.running && tm.started_at) ms += Date.now() - tm.started_at;
+      return Math.max(0, ms);
+    },
+    // mm:ss 显示（分钟可超过 59）
+    formatTimerMs(ms) {
+      const totalSec = Math.max(0, Math.floor(ms / 1000));
+      const mm = String(Math.floor(totalSec / 60)).padStart(2, '0');
+      const ss = String(totalSec % 60).padStart(2, '0');
+      return mm + ':' + ss;
+    },
+    timerToMinutes(ms) { return Math.max(1, Math.round(ms / 60000)); },
+    // 开始计时：单计时器模式，切换任务自动结算上一个
+    startTimer(taskId) {
+      const t = this.getTask(taskId);
+      if (!t || t.status === 'done') return null;
+      if (this.data.timer && this.data.timer.task_id === taskId) {
+        if (!this.data.timer.running) this.resumeTimer();
+        return { startedTaskId: taskId, settled: null };
+      }
+      const settled = this.data.timer ? this.settleTimer() : null;
+      this.data.timer = { task_id: taskId, started_at: Date.now(), accumulated_ms: 0, running: true };
       this.save();
+      return { startedTaskId: taskId, settled };
+    },
+    pauseTimer() {
+      const tm = this.data.timer;
+      if (!tm || !tm.running) return;
+      tm.accumulated_ms = (tm.accumulated_ms || 0) + Math.max(0, Date.now() - (tm.started_at || Date.now()));
+      tm.started_at = null; tm.running = false;
+      this.save();
+    },
+    resumeTimer() {
+      const tm = this.data.timer;
+      if (!tm || tm.running) return;
+      tm.started_at = Date.now(); tm.running = true;
+      this.save();
+    },
+    // 结算当前计时：写入时间记录并清空 timer
+    settleTimer() {
+      const tm = this.data.timer;
+      if (!tm) return null;
+      const endAt = Date.now();
+      const ms = this.timerElapsedMs();
+      if (ms < 5000) { // 误触不落账
+        this.data.timer = null; this.save();
+        return { task_id: tm.task_id, minutes: 0, start_at: endAt, end_at: endAt, discarded: true };
+      }
+      const minutes = this.timerToMinutes(ms);
+      const startAt = endAt - ms;
+      this.pushTimeEntry(tm.task_id, minutes, '', startAt, endAt);
+      const t = this.getTask(tm.task_id);
+      if (t && t.project_id) this.saveSnapshot(t.project_id, null, t.id);
+      this.data.timer = null; this.save();
+      return { task_id: tm.task_id, minutes, start_at: startAt, end_at: endAt };
+    },
+    stopTimer(taskId) {
+      const tm = this.data.timer;
+      if (!tm) return null;
+      if (taskId && tm.task_id !== taskId) return null;
+      return this.settleTimer();
+    },
+    // 单按钮切换：无计时→开始；计时中→暂停；已暂停→继续
+    toggleTimer(taskId) {
+      const t = this.getTask(taskId);
+      if (!t || t.status === 'done') return null;
+      const tm = this.data.timer;
+      if (!tm || tm.task_id !== taskId) {
+        const r = this.startTimer(taskId);
+        return { action: 'start', settled: r ? r.settled : null };
+      }
+      if (tm.running) { this.pauseTimer(); return { action: 'pause' }; }
+      this.resumeTimer(); return { action: 'resume' };
+    },
+    // 旧数据容错 + 陈旧保护（返回是否发生变更）
+    _normalizeTimer() {
+      const d = this.data; let changed = false;
+      if (d.timer === undefined) { d.timer = null; changed = true; }
+      const tm = d.timer; if (!tm) return changed;
+      if (typeof tm.task_id !== 'string' || !this.getTask(tm.task_id)) { d.timer = null; return true; }
+      if (typeof tm.accumulated_ms !== 'number' || !Number.isFinite(tm.accumulated_ms)) { tm.accumulated_ms = 0; changed = true; }
+      if (typeof tm.started_at !== 'number' || !Number.isFinite(tm.started_at)) { tm.started_at = null; changed = true; }
+      if (typeof tm.running !== 'boolean') { tm.running = false; changed = true; }
+      if (tm.running && !tm.started_at) { tm.running = false; changed = true; }
+      if (tm.running && tm.started_at && Date.now() - tm.started_at > STALE_TIMER_MS) {
+        tm.accumulated_ms = this.timerElapsedMs(); tm.started_at = null; tm.running = false; changed = true;
+      }
+      return changed;
     },
 
     /* ----- ContextSnapshot ----- */

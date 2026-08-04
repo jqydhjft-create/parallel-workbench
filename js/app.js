@@ -68,6 +68,54 @@
     $('#globalSearch').value = STATE.filters.search;
   }
 
+  /* ================= 计时器 (F11) ================= */
+  // 任务行操作区的计时按钮组（pfx 为视图前缀：'' 或 'task-'）
+  function timerBtns(t, pfx) {
+    const tm = S.getTimer();
+    if (!tm || tm.task_id !== t.id) {
+      return '<button class="icon-btn timer-btn" data-act="' + pfx + 'timer" title="开始计时">▶</button>';
+    }
+    const pauseAct = pfx + 'timer-pause', stopAct = pfx + 'timer-stop';
+    const pauseBtn = tm.running
+      ? '<button class="icon-btn timer-btn on" data-act="' + pauseAct + '" title="暂停计时">⏸</button>'
+      : '<button class="icon-btn timer-btn paused" data-act="' + pauseAct + '" title="继续计时">▶</button>';
+    return pauseBtn + '<button class="icon-btn timer-btn stop" data-act="' + stopAct + '" title="停止计时">⏹</button>' +
+      '<span class="timer-tick">' + S.formatTimerMs(S.timerElapsedMs()) + '</span>';
+  }
+  // 看板卡片的迷你计时按钮
+  function timerMiniBtn(t) {
+    const tm = S.getTimer();
+    if (!tm || tm.task_id !== t.id) {
+      return '<button class="bc-timer timer-btn" data-act="timer" data-task="' + t.id + '" title="开始计时">▶</button>';
+    }
+    const btn = tm.running
+      ? '<button class="bc-timer timer-btn on" data-act="timer" data-task="' + t.id + '" title="暂停">⏸</button>'
+      : '<button class="bc-timer timer-btn paused" data-act="timer" data-task="' + t.id + '" title="继续">▶</button>';
+    return btn + '<span class="timer-tick">' + S.formatTimerMs(S.timerElapsedMs()) + '</span>';
+  }
+  // 点击计时按钮的统一处理
+  function handleTimerToggle(taskId) {
+    const t = S.getTask(taskId);
+    if (!t) return;
+    if (t.status === 'done') { toast('已完成任务不能计时', 'err'); return; }
+    const r = S.toggleTimer(taskId);
+    if (!r) return;
+    if (r.action === 'start') {
+      toast(r.settled
+        ? '已结算「' + esc((S.getTask(r.settled.task_id) || { title: '任务' }).title) + '」' + r.settled.minutes + ' 分钟，开始「' + esc(t.title) + '」'
+        : '开始计时：' + esc(t.title), 'ok');
+    } else if (r.action === 'pause') { toast('已暂停计时'); }
+    else { toast('已继续计时', 'ok'); }
+    render(); updateTimerChip();
+  }
+  function handleTimerStop(taskId) {
+    const r = S.stopTimer(taskId);
+    if (r) {
+      toast(r.discarded ? '计时时间过短，未记录' : '已记录 ' + r.minutes + ' 分钟', r.discarded ? 'err' : 'ok');
+      render(); updateTimerChip();
+    }
+  }
+
   /* ================= 任务卡片公共 ================= */
   function taskChip(t) {
     const tags = (t.tags || []).map(tg => '<span class="tag tl">' + esc(tg) + '</span>').join('');
@@ -83,11 +131,13 @@
     const blockInfo = t.status === 'blocked' && t.blocked_reason ? ' <span class="muted" title="阻塞原因">⚠ ' + esc(t.blocked_reason) + '</span>' : '';
     const est = t.estimate_min ? '<span>预计 ' + U.fmtMinutes(t.estimate_min) + '</span>' : '';
     const act = t.actual_min ? '<span>实记 ' + U.fmtMinutes(t.actual_min) + '</span>' : '';
-    return '<div class="task-item' + (t.status === 'done' ? ' done' : '') + '" draggable="true" data-task="' + t.id + '" data-status="' + t.status + '">' +
+    const timing = S.getTimer() && S.getTimer().task_id === t.id;
+    return '<div class="task-item' + (t.status === 'done' ? ' done' : '') + (timing ? ' timing' : '') + '" draggable="true" data-task="' + t.id + '" data-status="' + t.status + '">' +
       '<button class="task-check ' + checked + '" data-act="' + pfx + 'toggle" title="标记完成/未完成">' + (checked ? '✓' : '') + '</button>' +
       '<div class="t-main"><div class="t-title">' + esc(t.title) + '</div>' + taskChip(t) + blockInfo + '</div>' +
       '<div class="t-sub" style="gap:8px;">' + est + act + '</div>' +
       '<div class="t-actions">' +
+      timerBtns(t, pfx) +
       '<button class="icon-btn" data-act="' + pfx + 'edit" title="编辑">✎</button>' +
       '<button class="icon-btn danger" data-act="' + pfx + 'del" title="删除">✕</button>' +
       '</div></div>';
@@ -158,6 +208,8 @@
         if (act === 'toggle') { toggleTask(taskId); }
         else if (act === 'edit') { openTaskModal(taskId); }
         else if (act === 'del') { confirmDeleteTask(taskId); }
+        else if (act === 'timer' || act === 'timer-pause') { handleTimerToggle(taskId); }
+        else if (act === 'timer-stop') { handleTimerStop(taskId); }
         else if (act === 'addPlan') { openAddPlanModal(); }
         else if (act === 'clearPlan') { clearPlan(); }
       });
@@ -171,8 +223,15 @@
   function toggleTask(id) {
     const t = S.getTask(id);
     if (!t) return;
-    S.updateTaskStatus(id, t.status === 'done' ? 'todo' : 'done');
-    render();
+    const willDone = t.status !== 'done';
+    // 勾选完成且该任务正在计时 → 先结算
+    const tm = S.getTimer();
+    if (willDone && tm && tm.task_id === id) {
+      const r = S.stopTimer(id);
+      if (r && !r.discarded) toast('完成并结算 ' + r.minutes + ' 分钟', 'ok');
+    }
+    S.updateTaskStatus(id, willDone ? 'done' : 'todo');
+    render(); updateTimerChip();
   }
   function clearPlan() {
     const plan = S.getTodayPlan();
@@ -328,6 +387,14 @@
           else if (act === 'task-edit') openTaskModal(id);
           else if (act === 'task-del') confirmDeleteTask(id);
         }
+        else if (act === 'task-timer' || act === 'task-timer-pause') {
+          const item = el.closest('.task-item');
+          if (item) handleTimerToggle(item.dataset.task);
+        }
+        else if (act === 'task-timer-stop') {
+          const item = el.closest('.task-item');
+          if (item) handleTimerStop(item.dataset.task);
+        }
       });
     });
     const note = $('#content [data-snapnote]');
@@ -410,6 +477,8 @@
         if (act === 'toggle') toggleTask(id);
         else if (act === 'edit') openTaskModal(id);
         else if (act === 'del') confirmDeleteTask(id);
+        else if (act === 'timer' || act === 'timer-pause') handleTimerToggle(id);
+        else if (act === 'timer-stop') handleTimerStop(id);
       });
     });
   }
@@ -435,6 +504,7 @@
             (t.due_date ? '<span class="small" style="color:var(--ink-3);">⏱ ' + U.fmtDate(t.due_date) + '</span>' : '') +
             (t.tags || []).slice(0, 2).map(tg => '<span class="tag tl">' + esc(tg) + '</span>').join('') + '</div>' + bInfo +
             '<div class="bc-meta"><span class="small" style="color:var(--ink-3);">' + esc(projectName(t.project_id)) + '</span></div>' +
+            '<div class="bc-meta" style="justify-content:flex-end;">' + timerMiniBtn(t) + '</div>' +
             '</div>';
         }).join('') + '</div></div>';
     }).join('');
@@ -447,6 +517,8 @@
     // 卡片拖拽
     $$('#content .board-card').forEach(card => {
       card.addEventListener('dragstart', e => {
+        // 点击计时按钮不触发拖拽
+        if (e.target.closest('[data-act="timer"]')) { e.preventDefault(); return; }
         STATE.dragTaskId = card.dataset.task;
         card.classList.add('dragging');
         e.dataTransfer.effectAllowed = 'move';
@@ -456,6 +528,15 @@
         card.classList.remove('dragging');
         $$('.board-col').forEach(c => c.classList.remove('drop-hint'));
         STATE.dragTaskId = null;
+      });
+    });
+    // 看板卡片计时按钮（stopPropagation 防拖拽）
+    $$('#content .board-card [data-act="timer"]').forEach(btn => {
+      btn.addEventListener('mousedown', e => e.stopPropagation());
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const c = btn.closest('.board-card');
+        if (c) handleTimerToggle(c.dataset.task);
       });
     });
     $$('#content [data-dropcol]').forEach(col => {
@@ -804,6 +885,8 @@
     list.addEventListener('dragstart', e => {
       const item = e.target.closest('.task-item');
       if (!item) return;
+      // 点击操作区按钮不触发拖拽
+      if (e.target.closest('.t-actions')) { e.preventDefault(); return; }
       dragEl = item;
       item.style.opacity = '.4';
       e.dataTransfer.effectAllowed = 'move';
@@ -890,6 +973,27 @@
     });
   }
 
+  /* ================= 计时器实时刷新 ================= */
+  function updateTimerChip() {
+    const chip = $('#timerChip');
+    if (!chip) return;
+    const tm = S.getTimer();
+    if (!tm) { chip.hidden = true; return; }
+    const t = S.getTask(tm.task_id);
+    if (!t) { chip.hidden = true; return; }
+    chip.hidden = false;
+    chip.querySelector('.timer-chip-time').textContent = S.formatTimerMs(S.timerElapsedMs());
+    chip.querySelector('.timer-chip-title').textContent = (tm.running ? '● ' : '‖ ') + t.title;
+    chip.classList.toggle('paused', !tm.running);
+  }
+  function tickTimers() {
+    const tm = S.getTimer();
+    if (!tm) return;
+    const txt = S.formatTimerMs(S.timerElapsedMs());
+    $$('.timer-tick').forEach(el => { el.textContent = txt; });
+    updateTimerChip();
+  }
+
   /* ================= 启动 ================= */
   function init() {
     S.load();
@@ -906,6 +1010,19 @@
       if (STATE.view === 'projects' && STATE.projectId) openTaskModal(null, STATE.projectId);
       else openTaskModal(null);
     });
+    // 顶栏计时 chip：点击跳转到计时任务所在视图
+    const chip = $('#timerChip');
+    if (chip) chip.addEventListener('click', () => {
+      const tm = S.getTimer();
+      if (!tm) return;
+      const t = S.getTask(tm.task_id);
+      if (!t) return;
+      if (t.project_id) switchView('projects', t.project_id);
+      else switchView('tasks');
+    });
+    // 秒级刷新计时显示
+    setInterval(tickTimers, 1000);
+    updateTimerChip();
     // 绑定全局任务行（在 render 后由各视图 bind 负责；此处兜底）
     switchView('home');
   }
