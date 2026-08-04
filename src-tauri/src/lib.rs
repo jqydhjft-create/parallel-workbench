@@ -10,7 +10,8 @@ pub fn run() {
             crate::commands::load_data,
             crate::commands::save_data,
             crate::commands::open_path,
-            crate::commands::backup_to
+            crate::commands::backup_to,
+            crate::commands::scan_workbench_files
         ])
         .setup(|_app| {
             Ok(())
@@ -89,5 +90,56 @@ pub mod commands {
         let text = serde_json::to_string_pretty(&json).map_err(|e| format!("序列化失败: {e}"))?;
         fs::write(&path, text).map_err(|e| format!("写入备份失败: {e}"))?;
         Ok(path.to_string_lossy().into_owned())
+    }
+
+    /// 扫描工作空间根目录，查找含 workbench.json 对接文档的子目录（WorkBuddy 集成）
+    /// 入参：{ dir: String }；返回：{ projects: [ { name, path, tech_stack, desc, status, tasks_count, doc } ] }
+    #[tauri::command]
+    pub fn scan_workbench_files(dir: String) -> Result<Value, String> {
+        use serde_json::json;
+        let root = PathBuf::from(&dir);
+        if !root.is_dir() {
+            return Err(format!("目录不存在: {dir}"));
+        }
+        let mut projects = Vec::new();
+        let entries = fs::read_dir(&root).map_err(|e| format!("读取目录失败: {e}"))?;
+        for entry in entries {
+            let entry = entry.map_err(|e| format!("读取目录项失败: {e}"))?;
+            let p = entry.path();
+            if !p.is_dir() {
+                continue;
+            }
+            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if name.starts_with('.') || name == "node_modules" || name == "target" {
+                continue;
+            }
+            let doc_path = p.join("workbench.json");
+            if !doc_path.is_file() {
+                continue;
+            }
+            let text = fs::read_to_string(&doc_path).unwrap_or_default();
+            let doc: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+            let proj = doc.get("project");
+            let tasks = doc.get("tasks");
+            let tasks_count = tasks
+                .and_then(|t| t.as_array())
+                .map(|a| a.len())
+                .unwrap_or(0);
+            projects.push(json!({
+                "name": proj.and_then(|x| x.get("name")).and_then(|x| x.as_str()).unwrap_or(name).to_string(),
+                "path": p.to_string_lossy().into_owned(),
+                "tech_stack": proj.and_then(|x| x.get("tech_stack")).and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                "desc": proj.and_then(|x| x.get("description")).and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                "status": proj.and_then(|x| x.get("status")).and_then(|x| x.as_str()).unwrap_or("active").to_string(),
+                "repo_url": proj.and_then(|x| x.get("repo_url")).and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                "tasks_count": tasks_count,
+                "doc": doc
+            }));
+        }
+        projects.sort_by(|a, b| {
+            a.get("name").and_then(|x| x.as_str()).unwrap_or("")
+                .cmp(b.get("name").and_then(|x| x.as_str()).unwrap_or(""))
+        });
+        Ok(json!({ "projects": projects }))
     }
 }

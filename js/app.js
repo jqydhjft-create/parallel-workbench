@@ -333,6 +333,7 @@
     return '<div class="pd-head">' +
       '<span class="proj-dot" style="width:14px;height:14px;background:' + p.color + '"></span>' +
       '<span class="pd-name">' + esc(p.name) + '</span>' +
+      (p.workspace ? '<span class="tag tl" title="来自 WorkBuddy 对接文档 workbench.json">🤖 对接项目</span>' : '') +
       '<span class="tag ' + stCls + '">' + stLabel + '</span>' +
       '<span class="grow"></span>' +
       '<div class="pd-actions">' +
@@ -728,6 +729,15 @@
         : '<div class="empty" style="padding:20px;">暂无备份记录</div>') +
       '</div>' +
       '</div>' +
+      '<div class="card" style="margin-top:14px;"><h3>🤖 WorkBuddy 工作空间 <span class="muted small">(扫描含 workbench.json 对接文档的项目)</span></h3>' +
+      (S.getWorkspaces().length ? S.getWorkspaces().map(ws =>
+        '<div class="ws-card"><div><b>📁 ' + esc(ws.name) + '</b><div class="muted small" style="margin-top:2px;">' + esc(ws.path) + '</div></div>' +
+        '<div style="display:flex;gap:8px;"><button class="btn btn-sm" data-act="scanWs" data-dir="' + esc(ws.path) + '">扫描</button>' +
+        '<button class="btn btn-sm btn-danger" data-act="removeWs" data-id="' + ws.id + '">移除</button></div></div>').join('')
+        : '<div class="muted" style="margin:8px 0;">尚未添加工作空间。添加后应用会扫描其中的项目（需每个项目目录含 <code>workbench.json</code> 对接文档）。</div>') +
+      '<div class="set-row" style="margin-top:8px;"><div><div class="sr-label">添加工作空间目录</div><div class="sr-desc">选择存放项目的根目录，扫描其中的 workbench.json</div></div>' +
+      '<button class="btn btn-sm btn-primary" data-act="addWs">＋ 添加</button></div>' +
+      '</div>' +
       '<div class="card" style="margin-top:14px;"><h3>⚙ 偏好</h3>' +
       '<div class="set-row"><div><div class="sr-label">截止日期提醒</div><div class="sr-desc">当天上午系统通知（P1 功能，原型为占位开关）</div></div>' +
       '<label class="switch-wrap"><input type="checkbox" id="setDue" ' + (s.remindDue ? 'checked' : '') + '><span>开</span></label></div>' +
@@ -744,6 +754,12 @@
       else if (act === 'importJSON') { doImport(); }
       else if (act === 'reset') { confirmReset(); }
       else if (act === 'backup') { const b = S.createBackup(); toast('备份已创建：' + b.file_path, 'ok'); render(); }
+      else if (act === 'addWs') { openAddWorkspaceModal(); }
+      else if (act === 'scanWs') { scanWorkspaceAndImport(el.dataset.dir, false); }
+      else if (act === 'removeWs') {
+        S.saveWorkspaces(S.getWorkspaces().filter(w => w.id !== el.dataset.id));
+        toast('工作空间已移除', 'ok'); render();
+      }
     }));
     $('#importFile').addEventListener('change', e => {
       const f = e.target.files[0];
@@ -763,9 +779,64 @@
     $('#setPlan').addEventListener('change', e => { S.data.settings.remindPlan = e.target.checked; S.save(); });
   }
 
-  // 导出：Tauri 环境走原生保存对话框，浏览器回退为下载
-  async function doExport(defaultName, content, mime) {
+  // ============ WorkBuddy 工作空间（对接文档集成） ============
+  // 添加工作空间：Tauri 走原生目录选择，浏览器回退 prompt
+  async function openAddWorkspaceModal() {
     if (window.__TAURI__ && window.__TAURI__.dialog) {
+      try {
+        const { open } = window.__TAURI__.dialog;
+        const path = await open({ directory: true, multiple: false, title: '选择工作空间根目录' });
+        if (!path) return;
+        addWorkspacePath(path);
+      } catch (e) { toast('选择目录失败：' + e.message, 'err'); }
+    } else {
+      const path = prompt('输入工作空间根目录路径（含 workbench.json 对接文档的项目将被扫描）：');
+      if (path) addWorkspacePath(path);
+    }
+  }
+  function addWorkspacePath(path) {
+    const list = S.getWorkspaces();
+    if (list.some(w => w.path === path)) { toast('该目录已在工作空间中', 'err'); return; }
+    list.push({ id: 'ws_' + Date.now().toString(36), path, name: path.split(/[\\/]/).pop() || '工作空间', added_at: Date.now() });
+    S.saveWorkspaces(list);
+    toast('已添加工作空间', 'ok');
+    scanWorkspaceAndImport(path, false);
+  }
+  // 扫描工作空间并导入（confirm 为 true 时扫描后直接全选导入，否则扫描后弹确认）
+  async function scanWorkspaceAndImport(dir, autoImport) {
+    const btn = $('#content [data-act="scanWs"][data-dir="' + esc(dir) + '"]');
+    if (btn) { btn.disabled = true; btn.textContent = '扫描中…'; }
+    const res = await S.scanWorkspace(dir);
+    if (btn) { btn.disabled = false; btn.textContent = '扫描'; }
+    if (!res) { toast('扫描失败（桌面端需在应用内使用）', 'err'); return; }
+    const projects = res.projects || [];
+    if (!projects.length) { toast('未找到含 workbench.json 的项目', 'err'); return; }
+    if (autoImport) {
+      projects.forEach(p => S.importFromWorkbench(p));
+      toast('已导入 ' + projects.length + ' 个项目', 'ok'); render();
+      return;
+    }
+    // 确认弹窗：多选导入
+    openModal('<h3>扫描结果 · 发现 ' + projects.length + ' 个对接项目</h3>', '<div class="muted" style="margin-bottom:10px;">勾选要导入的项目（已导入的将更新）</div>' +
+      '<div style="max-height:46vh;overflow-y:auto;display:flex;flex-direction:column;gap:6px;">' + projects.map(p => {
+        const existing = S.getProjects().find(x => x.source_dir === p.path);
+        return '<label class="task-item" style="cursor:pointer;margin:0;"><input type="checkbox" class="ws-cand" value="' + esc(p.path) + '" checked style="width:16px;height:16px;accent-color:var(--accent);">' +
+          '<div class="t-main"><div class="t-title">' + esc(p.name) + (existing ? ' <span class="tag st-active">已导入</span>' : ' <span class="tag tl">新增</span>') + '</div>' +
+          '<div class="t-sub">' + (p.tech_stack ? esc(p.tech_stack) + ' · ' : '') + p.tasks_count + ' 个任务' + (p.desc ? ' · ' + esc(p.desc.slice(0, 40)) : '') + '</div></div></label>';
+      }).join('') + '</div>' +
+      '<div class="form-actions"><button class="btn" data-close>取消</button><button class="btn btn-primary" data-act="confirmWsImport">导入选中</button></div>');
+    $('#modalBox [data-act="confirmWsImport"]').addEventListener('click', () => {
+      const checked = $$('.ws-cand:checked').map(i => i.value);
+      if (!checked.length) { toast('请至少选择一个项目', 'err'); return; }
+      projects.filter(p => checked.includes(p.path)).forEach(p => S.importFromWorkbench(p));
+      closeModal();
+      toast('已导入 ' + checked.length + ' 个项目', 'ok');
+      render();
+    });
+  }
+
+  // 导出：Tauri 环境走原生保存对话框，浏览器回退为下载
+  async function doExport(defaultName, content, mime) {    if (window.__TAURI__ && window.__TAURI__.dialog) {
       try {
         const { save } = window.__TAURI__.dialog;
         const { writeTextFile } = window.__TAURI__.fs;

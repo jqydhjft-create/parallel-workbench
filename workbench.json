@@ -1,0 +1,68 @@
+{
+  "schema": "workbench-v1",
+  "updated_at": 1785841200000,
+  "project": {
+    "name": "并行工作台",
+    "description": "面向独立开发者的本地优先多项目并行开发管理桌面应用。Tauri 2 + 原生前端，一个入口管住所有项目，2 秒恢复上下文，1 张看板看清优先级，1 份周报完成复盘。",
+    "status": "active",
+    "tech_stack": "Tauri 2 + 原生 HTML/CSS/JS",
+    "repo_url": "github.com/jqydhjft-create/parallel-workbench",
+    "local_path": "D:/个人开发者项目管理器/parallel-workbench"
+  },
+  "tasks": [
+    {
+      "title": "实现 F11 计时器",
+      "status": "done",
+      "priority": "P1",
+      "due_date": "2026-08-04",
+      "estimate_min": 300,
+      "tags": ["计时", "M2"],
+      "note": "单计时器模式，任务行+看板卡片入口，重启持久化"
+    },
+    {
+      "title": "实现 F14 统计面板增强",
+      "status": "done",
+      "priority": "P1",
+      "due_date": "2026-08-04",
+      "estimate_min": 300,
+      "tags": ["统计", "M2"],
+      "note": "周/月切换、时间趋势图、完成趋势、占比饼图、预估vs实际"
+    },
+    {
+      "title": "WorkBuddy 工作空间集成（对接文档方案）",
+      "status": "in_progress",
+      "priority": "P1",
+      "due_date": "2026-08-05",
+      "estimate_min": 300,
+      "tags": ["集成", "WorkBuddy"],
+      "note": "每项目根目录 workbench.json，WorkBuddy 维护、应用只读导入，实现闭环 demo"
+    },
+    {
+      "title": "F17 提醒（截止日期/每日计划）",
+      "status": "todo",
+      "priority": "P1",
+      "due_date": null,
+      "estimate_min": 240,
+      "tags": ["M3", "提醒"],
+      "note": "截止当天上午系统通知，09:00 每日计划提醒，开关可配置"
+    },
+    {
+      "title": "F19 备份还原 UI",
+      "status": "todo",
+      "priority": "P2",
+      "due_date": null,
+      "estimate_min": 120,
+      "tags": ["备份"],
+      "note": "store 有 restoreBackup 方法但无还原入口，补上设置页还原按钮"
+    },
+    {
+      "title": "调研云同步方案（CRDT vs OT）",
+      "status": "todo",
+      "priority": "P2",
+      "due_date": "2026-08-10",
+      "estimate_min": 180,
+      "tags": ["调研", "P2"],
+      "note": "多端数据同步可选能力，P2 里程碑"
+    }
+  ]
+}

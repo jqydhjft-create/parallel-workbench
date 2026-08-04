@@ -212,5 +212,50 @@ assert('趋势标签格式正确', /^\d+\/\d+$/.test(sw.timeTrend[0].label));
 const oldEntry = S.data.timeEntries.find(e => e.task_id === trendTask.id);
 assert('时间记录 end_at 为数值', typeof oldEntry.end_at === 'number' && oldEntry.end_at > 0);
 
+console.log('== WorkBuddy 工作空间集成 ==');
+// workspaces 默认空
+assert('workspaces 默认空数组', Array.isArray(S.getWorkspaces()) && S.getWorkspaces().length === 0);
+// saveWorkspaces 往返
+const ws = [{ id: 'ws1', path: 'D:/ws', name: '工作空间', added_at: Date.now() }];
+S.saveWorkspaces(ws);
+assert('workspaces 保存往返', S.getWorkspaces().length === 1 && S.getWorkspaces()[0].path === 'D:/ws');
+// importFromWorkbench：构造模拟 scan 返回的候选
+const candidate = {
+  name: '模拟项目',
+  path: 'D:/ws/demo-project',
+  tech_stack: 'Node.js',
+  desc: '来自对接文档',
+  status: 'active',
+  tasks_count: 2,
+  doc: {
+    project: { name: '模拟项目', description: '来自对接文档', status: 'active', tech_stack: 'Node.js', repo_url: 'github.com/x/demo' },
+    tasks: [
+      { title: '任务甲', status: 'in_progress', priority: 'P0', due_date: '2026-08-10', estimate_min: 120, tags: ['demo'] },
+      { title: '任务乙', status: 'done', priority: 'P1', estimate_min: 60 }
+    ]
+  }
+};
+const proj = S.importFromWorkbench(candidate);
+assert('导入新项目成功', proj && proj.workspace === true && proj.source_dir === 'D:/ws/demo-project');
+assert('项目名来自文档', proj.name === '模拟项目');
+const imported = S.getProjects().find(p => p.source_dir === 'D:/ws/demo-project');
+assert('导入项目可在列表中查到', !!imported);
+const itasks = S.getProjectTasks(imported.id);
+assert('导入 2 个任务', itasks.length === 2);
+assert('任务状态正确(in_progress/done)', itasks.some(t => t.title === '任务甲' && t.status === 'in_progress') && itasks.some(t => t.title === '任务乙' && t.status === 'done'));
+assert('任务优先级正确', itasks.find(t => t.title === '任务甲').priority === 'P0');
+// 再次导入同目录 → 更新而非新增
+const beforeCount = S.getProjects().length;
+S.importFromWorkbench(candidate);
+assert('重复导入不新增项目', S.getProjects().length === beforeCount);
+assert('重复导入任务不重复', S.getProjectTasks(imported.id).length === 2);
+// 导入 JSON 容错（无 workspaces 字段）
+delete S.data.workspaces;
+S.importJSON(JSON.stringify(S.data));
+assert('旧数据无 workspaces 容错', Array.isArray(S.data.workspaces));
+// 清理测试数据
+S.deleteProject(imported.id);
+S.saveWorkspaces([]);
+
 console.log('\n结果: ' + pass + ' 通过, ' + fail + ' 失败');
 process.exit(fail ? 1 : 0);

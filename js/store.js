@@ -114,6 +114,7 @@
       snapshots,
       backups: [],
       timer: null,
+      workspaces: [],
       settings: { dark: false, remindDue: true, remindPlan: true, remindTime: '09:00', backupKeep: 7 }
     };
   }
@@ -141,6 +142,13 @@
   async function tauriOpenPath(path) {
     if (!isTauri()) throw new Error('浏览器模式不支持打开本地目录');
     await window.__TAURI__.core.invoke('open_path', { path });
+  }
+  // 扫描工作空间根目录，查找含 workbench.json 对接文档的项目（WorkBuddy 集成）
+  async function tauriScanWorkbench(dir) {
+    if (!isTauri()) return null;
+    try {
+      return await window.__TAURI__.core.invoke('scan_workbench_files', { dir });
+    } catch (e) { console.warn('[Tauri] scan_workbench_files 失败:', e); return null; }
   }
 
   const Store = {
@@ -183,12 +191,67 @@
     importJSON(text) {
       const d = JSON.parse(text);
       if (!d || !Array.isArray(d.projects) || !Array.isArray(d.tasks)) throw new Error('文件格式不正确');
+      if (!Array.isArray(d.workspaces)) d.workspaces = [];
       this.data = d;
       this._normalizeTimer();
       this.save();
     },
     /* 打开本地路径（F16 桌面能力） */
     openLocalPath(path) { return tauriOpenPath(path); },
+    /* 扫描工作空间（WorkBuddy 集成：读 workbench.json 对接文档） */
+    scanWorkspace(dir) { return tauriScanWorkbench(dir); },
+    getWorkspaces() { return Array.isArray(this.data.workspaces) ? this.data.workspaces : []; },
+    saveWorkspaces(list) { this.data.workspaces = list; this.save(); },
+    // 按对接文档导入项目+任务（doc 来自 scan_workbench_files 返回的候选）
+    importFromWorkbench(candidate) {
+      const doc = candidate.doc || {};
+      const pj = doc.project || {};
+      const dir = candidate.path;
+      let proj = this.data.projects.find(p => p.source_dir === dir);
+      if (!proj) {
+        proj = {
+          id: uid(), name: candidate.name, description: candidate.desc || '来自 WorkBuddy 对接文档',
+          status: pj.status === 'paused' || pj.status === 'archived' ? pj.status : 'active',
+          tech_stack: candidate.tech_stack || '', repo_url: pj.repo_url || '',
+          local_path: dir, ports: '', env_notes: '',
+          docs_link: '', deploy_url: '', color: COLORS[4],
+          source_dir: dir, workspace: true,
+          created_at: Date.now(), updated_at: Date.now()
+        };
+        this.data.projects.push(proj);
+      } else {
+        // 已存在：同步技术栈/描述/状态（不覆盖用户改过的 name）
+        proj.tech_stack = candidate.tech_stack || proj.tech_stack;
+        proj.description = candidate.desc || proj.description;
+        if (pj.status && pj.status !== 'active') proj.status = pj.status;
+        proj.local_path = dir;
+        proj.updated_at = Date.now();
+      }
+      // 导入任务（对接文档为权威，标题相同的更新，不删除应用内已有任务）
+      const tasks = Array.isArray(doc.tasks) ? doc.tasks : [];
+      tasks.forEach(tt => {
+        const title = tt.title || '';
+        if (!title) return;
+        let t = this.data.tasks.find(x => x.project_id === proj.id && x.title === title);
+        const st = tt.status === 'in_progress' || tt.status === 'blocked' || tt.status === 'done' || tt.status === 'todo' ? tt.status : 'todo';
+        if (!t) {
+          t = { id: uid(), project_id: proj.id, title, description: tt.note || '', status: st, priority: tt.priority || 'P2',
+            due_date: tt.due_date || null, estimate_min: tt.estimate_min || 60, actual_min: 0, tags: tt.tags || [],
+            context_note: '', blocked_reason: '', created_at: Date.now(), updated_at: Date.now(), completed_at: st === 'done' ? Date.now() : null };
+          this.data.tasks.push(t);
+        } else {
+          t.status = st; t.priority = tt.priority || t.priority;
+          if (tt.due_date != null) t.due_date = tt.due_date;
+          if (tt.estimate_min != null) t.estimate_min = tt.estimate_min;
+          if (tt.tags) t.tags = tt.tags;
+          if (tt.note) t.description = tt.note;
+          t.completed_at = st === 'done' ? (t.completed_at || Date.now()) : null;
+          t.updated_at = Date.now();
+        }
+      });
+      this.save();
+      return proj;
+    },
 
     /* ----- Project ----- */
     getProjects() { return this.data.projects; },
