@@ -342,3 +342,10 @@ body.dark .timer-btn.stop:hover{background:#3a2020;}
 /* ===== WorkBuddy 工作空间 (对接文档集成) ===== */
 .ws-card{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 12px;border:1px solid var(--line);border-radius:10px;margin-top:8px;background:var(--bg);}
 .ws-card b{font-size:13px;}
+
+/* ===== WorkBuddy 集成状态（一键安装） ===== */
+.ws-integ{margin-top:10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);}
+.ws-integ-dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex-shrink:0;}
+.ws-integ-dot.ok{background:var(--ok);}
+.ws-integ-dot.warn{background:var(--warn);}
+.ws-integ-dot.off{background:var(--ink-3);}

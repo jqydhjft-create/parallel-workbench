@@ -200,6 +200,16 @@
     openLocalPath(path) { return tauriOpenPath(path); },
     /* 扫描工作空间（WorkBuddy 集成：读 workbench.json 对接文档） */
     scanWorkspace(dir) { return tauriScanWorkbench(dir); },
+    /* WorkBuddy 集成状态检查（技能/记忆是否已装） */
+    checkWbIntegration() {
+      if (!isTauri()) return Promise.resolve(null);
+      return window.__TAURI__.core.invoke('check_workbuddy_integration').catch(e => { console.warn('[Tauri] check 失败:', e); return null; });
+    },
+    /* 一键安装 WorkBuddy 集成（写技能 + 合并记忆） */
+    installWbIntegration() {
+      if (!isTauri()) return Promise.resolve(null);
+      return window.__TAURI__.core.invoke('install_workbuddy_integration').catch(e => { console.warn('[Tauri] install 失败:', e); return null; });
+    },
     getWorkspaces() { return Array.isArray(this.data.workspaces) ? this.data.workspaces : []; },
     saveWorkspaces(list) { this.data.workspaces = list; this.save(); },
     // 按对接文档导入项目+任务（doc 来自 scan_workbench_files 返回的候选）
