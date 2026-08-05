@@ -253,6 +253,15 @@ assert('重复导入任务不重复', S.getProjectTasks(imported.id).length === 
 delete S.data.workspaces;
 S.importJSON(JSON.stringify(S.data));
 assert('旧数据无 workspaces 容错', Array.isArray(S.data.workspaces));
+// 删除项目 → 连带删除其下任务（不再移入收集箱）
+S.saveProject({ id: 'p_del', name: '删除测试项目', status: 'active', created_at: Date.now(), updated_at: Date.now() });
+S.saveTask({ id: 't_del1', project_id: 'p_del', title: '待删任务1', status: 'todo', priority: 'P2', created_at: Date.now(), updated_at: Date.now() });
+S.saveTask({ id: 't_del2', project_id: 'p_del', title: '待删任务2', status: 'todo', priority: 'P2', created_at: Date.now(), updated_at: Date.now() });
+assert('删除前项目有 2 任务', S.getProjectTasks('p_del').length === 2);
+S.deleteProject('p_del');
+assert('删除后项目消失', !S.getProject('p_del'));
+assert('删除后任务连带删除', !S.getTasks().some(t => t.id === 't_del1' || t.id === 't_del2'));
+assert('删除后不残留无归属任务', !S.getInboxTasks().some(t => t.project_id === 'p_del'));
 // 清理测试数据
 S.deleteProject(imported.id);
 S.saveWorkspaces([]);

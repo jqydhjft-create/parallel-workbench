@@ -413,7 +413,8 @@
   }
   function confirmDeleteProject(id) {
     const p = S.getProject(id);
-    openModal('<h3>删除项目</h3>', '<p style="color:var(--danger);">⚠ 将删除项目「' + esc(p.name) + '」，其下任务会移入收集箱（不删除任务）。此操作不可撤销。</p>' +
+    const n = S.getProjectTasks(id).length;
+    openModal('<h3>删除项目</h3>', '<p style="color:var(--danger);">⚠ 将删除项目「' + esc(p.name) + '」' + (n ? '及其下 ' + n + ' 个任务' : '') + '。此操作不可撤销。</p>' +
       '<div class="form-actions"><button class="btn" data-close>取消</button><button class="btn btn-danger" data-act="ok">确认删除</button></div>');
     $('#modalBox [data-act="ok"]').addEventListener('click', () => { S.deleteProject(id); closeModal(); toast('项目已删除', 'ok'); switchView('projects'); });
   }

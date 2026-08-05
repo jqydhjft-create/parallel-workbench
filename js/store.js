@@ -274,8 +274,13 @@
       this.save();
     },
     deleteProject(id) {
+      // 连带删除该项目的所有任务，并清理计划中对这些任务的引用（不再移入收集箱）
+      const removedIds = this.data.tasks.filter(t => t.project_id === id).map(t => t.id);
+      this.data.tasks = this.data.tasks.filter(t => t.project_id !== id);
+      Object.keys(this.data.plans).forEach(k => {
+        this.data.plans[k].task_order = this.data.plans[k].task_order.filter(x => !removedIds.includes(x));
+      });
       this.data.projects = this.data.projects.filter(p => p.id !== id);
-      this.data.tasks.forEach(t => { if (t.project_id === id) t.project_id = null; });
       delete this.data.snapshots[id];
       this.save();
     },
