@@ -1,6 +1,6 @@
 {
   "schema": "workbench-v1",
-  "updated_at": 1785859557377,
+  "updated_at": 1785899260627,
   "project": {
     "name": "并行工作台",
     "description": "面向独立开发者的本地优先多项目并行开发管理桌面应用。Tauri 2 + 原生前端，一个入口管住所有项目，2 秒恢复上下文，1 张看板看清优先级，1 份周报完成复盘。",
@@ -36,15 +36,51 @@
     },
     {
       "title": "WorkBuddy 工作空间集成（对接文档方案）",
-      "status": "in_progress",
+      "status": "done",
       "priority": "P1",
       "due_date": "2026-08-05",
-      "estimate_min": 300,
+      "estimate_min": 360,
       "tags": [
         "集成",
         "WorkBuddy"
       ],
-      "note": "每项目根目录 workbench.json，WorkBuddy 维护、应用只读导入，实现闭环 demo"
+      "note": "闭环完成：设置页一键导入集成技能（项目级 .workbuddy/skills，不写全局/记忆）、添加工作空间自动导入+扫描、切视图静默同步 workbench.json、扫描支持项目目录/父目录两种层级"
+    },
+    {
+      "title": "新拟态 UI 落地",
+      "status": "done",
+      "priority": "P2",
+      "due_date": "2026-08-05",
+      "estimate_min": 180,
+      "tags": [
+        "UI",
+        "视觉"
+      ],
+      "note": "新拟态 token（亮暗双主题）+ 组件改造：卡片/统计/按钮凸起双阴影、输入/看板列凹下、关键操作实底高对比、健康度卡片保留左状态色条"
+    },
+    {
+      "title": "修复：删除项目连带删除任务",
+      "status": "done",
+      "priority": "P1",
+      "due_date": "2026-08-05",
+      "estimate_min": 60,
+      "tags": [
+        "bugfix",
+        "数据一致性"
+      ],
+      "note": "原行为任务移入收集箱导致孤儿残留，改为连带删除并清理计划引用，确认弹窗提示任务数"
+    },
+    {
+      "title": "修复：集成状态卡住与扫描层级",
+      "status": "done",
+      "priority": "P1",
+      "due_date": "2026-08-05",
+      "estimate_min": 60,
+      "tags": [
+        "bugfix",
+        "WorkBuddy"
+      ],
+      "note": "反斜杠路径导致 CSS 选择器转义失败状态卡住（改 data-wsid 定位）；扫描支持所选目录本身含 workbench.json"
     },
     {
       "title": "F17 提醒（截止日期/每日计划）",
@@ -91,10 +127,6 @@
         "P2"
       ],
       "note": "多端数据同步可选能力，P2 里程碑"
-    },
-    {
-      "title": "FINAL",
-      "status": "todo"
     }
   ]
 }
